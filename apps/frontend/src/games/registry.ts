@@ -2,12 +2,14 @@ import type { GameUi } from './types.js';
 import { snakesAndLaddersUi } from './snakes-and-ladders-ui.js';
 import { ludoUi } from './ludo-ui.js';
 import { unoUi, unoFlipUi } from './uno-ui.js';
+import { chessUi } from './chess-ui.js';
 
 const uis: GameUi[] = [
   snakesAndLaddersUi,
   ludoUi,
   unoUi,
   unoFlipUi,
+  chessUi,
 ];
 
 const bySlug = new Map(uis.map((u) => [u.slug, u]));

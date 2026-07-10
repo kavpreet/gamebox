@@ -10,12 +10,14 @@ import type { GameModule } from '@gamebox/core-engine';
 import { snakesAndLadders } from '@gamebox/game-snakes-and-ladders';
 import { ludo } from '@gamebox/game-ludo';
 import { uno, unoFlip } from '@gamebox/game-uno';
+import { chess } from '@gamebox/game-chess';
 
 const modules: GameModule<any, any, any>[] = [
   snakesAndLadders,
   ludo,
   uno,
   unoFlip,
+  chess,
 ];
 
 for (const m of modules) {
