@@ -629,7 +629,7 @@ export const catan: GameModule<CatanPublic, CatanPrivate | Hidden, CatanMove> = 
       const s = state as State;
       const pub = s.public;
       requireMain(pub, seat);
-      const { to, give, get } = payload as CatanTrade;
+      const { to, give, get } = payload as unknown as CatanTrade;
       if (to === seat || !pub.order.includes(to)) throw new IllegalMove('Bad trade target');
       const giveTotal = RESOURCES.reduce((x, k) => x + (give[k] ?? 0), 0);
       const getTotal = RESOURCES.reduce((x, k) => x + (get[k] ?? 0), 0);
