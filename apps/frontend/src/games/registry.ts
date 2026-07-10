@@ -11,6 +11,7 @@ import { pandemicUi } from './pandemic-ui.js';
 import { monopolyUi } from './monopoly-ui.js';
 import { catanUi } from './catan-ui.js';
 import { codenamesUi } from './codenames-ui.js';
+import { azulUi } from './azul-ui.js';
 
 const uis: GameUi[] = [
   snakesAndLaddersUi,
@@ -26,6 +27,7 @@ const uis: GameUi[] = [
   monopolyUi,
   catanUi,
   codenamesUi,
+  azulUi,
 ];
 
 const bySlug = new Map(uis.map((u) => [u.slug, u]));

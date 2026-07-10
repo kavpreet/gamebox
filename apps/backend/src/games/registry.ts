@@ -19,6 +19,7 @@ import { pandemic } from '@gamebox/game-pandemic';
 import { monopoly } from '@gamebox/game-monopoly';
 import { catan } from '@gamebox/game-catan';
 import { codenames } from '@gamebox/game-codenames';
+import { azul } from '@gamebox/game-azul';
 
 const modules: GameModule<any, any, any>[] = [
   snakesAndLadders,
@@ -34,6 +35,7 @@ const modules: GameModule<any, any, any>[] = [
   monopoly,
   catan,
   codenames,
+  azul,
 ];
 
 for (const m of modules) {
