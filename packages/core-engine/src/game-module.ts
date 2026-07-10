@@ -59,6 +59,13 @@ export interface GameModule<TPublic = unknown, TPrivate = unknown, TMove = unkno
   disconnectOptions?(state: GameState<TPublic, TPrivate>): DisconnectOption[];
 
   onPlayerRemoved?(state: GameState<TPublic, TPrivate>, seat: Seat): void;
+
+  /**
+   * Auto-pass this seat's turn (the 'skip' disconnect-vote outcome). A module
+   * that cannot legally pass a turn (chess) omits this — and must then also
+   * exclude 'skip' from disconnectOptions.
+   */
+  onPlayerSkipped?(state: GameState<TPublic, TPrivate>, seat: Seat): void;
 }
 
 export interface GameModuleRegistration {

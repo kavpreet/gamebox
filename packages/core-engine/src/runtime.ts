@@ -133,6 +133,18 @@ export class GameRuntime {
   }
 
   /**
+   * Auto-pass a seat's turn (skip-vote outcome). Only valid if the module
+   * implements onPlayerSkipped.
+   */
+  skipSeat(seat: Seat): ApplyMoveResult {
+    if (!this.module.onPlayerSkipped) {
+      throw new IllegalMove('This game cannot skip turns');
+    }
+    this.module.onPlayerSkipped(this.state, seat);
+    return this.afterMutation();
+  }
+
+  /**
    * System-driven mutation (kick resolution, auto-skip). seat=null in the move log.
    */
   removePlayer(seat: Seat): ApplyMoveResult {

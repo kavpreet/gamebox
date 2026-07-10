@@ -1,0 +1,44 @@
+{
+  "name": "@gamebox/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "migrate": "tsx src/db/migrate-cli.ts",
+    "seed": "tsx src/db/seed-cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@gamebox/core-engine": "*",
+    "@gamebox/game-catan": "*",
+    "@gamebox/game-checkers": "*",
+    "@gamebox/game-chess": "*",
+    "@gamebox/game-chinese-checkers": "*",
+    "@gamebox/game-ludo": "*",
+    "@gamebox/game-monopoly": "*",
+    "@gamebox/game-pandemic": "*",
+    "@gamebox/game-risk": "*",
+    "@gamebox/game-rummy": "*",
+    "@gamebox/game-snakes-and-ladders": "*",
+    "@gamebox/game-uno": "*",
+    "@gamebox/shared-types": "*",
+    "better-auth": "^1.3.3",
+    "better-sqlite3": "^12.2.0",
+    "express": "^5.1.0",
+    "kysely": "^0.28.2",
+    "pg": "^8.16.3",
+    "socket.io": "^4.8.1",
+    "tsx": "^4.20.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.15.4",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
