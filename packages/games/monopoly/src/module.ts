@@ -254,9 +254,8 @@ function doBankruptcy(pub: MonopolyPublic, seat: Seat, creditor: Seat | null): v
   checkWinner(pub);
   if (pub.winner === null && currentSeat(pub) === seat) {
     advanceTurn(pub);
-  } else if (pub.winner === null) {
-    pub.phase = pub.pendingBuy !== null ? 'ACT' : pub.phase === 'DEBT' ? 'ACT' : pub.phase;
-    if (pub.phase === 'DEBT') pub.phase = 'ACT';
+  } else if (pub.winner === null && (pub.pendingBuy !== null || pub.phase === 'DEBT')) {
+    pub.phase = 'ACT';
   }
 }
 
