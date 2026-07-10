@@ -1,0 +1,12 @@
+{
+  "name": "@gamebox/game-scrabble",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@gamebox/core-engine": "*",
+    "@gamebox/shared-types": "*"
+  }
+}
