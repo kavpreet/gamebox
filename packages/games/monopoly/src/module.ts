@@ -625,8 +625,15 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       for (const [posStr, prop] of Object.entries(pub.properties)) {
         const pos = Number(posStr);
         if (prop.owner !== seat) continue;
-        if (prop.houses > 0) moves.push({ kind: 'SELL_HOUSE', position: pos });
-        else if (!prop.mortgaged) moves.push({ kind: 'MORTGAGE', position: pos });
+        const spd = space(pos);
+        if (prop.houses > 0) {
+          if (prop.houses >= Math.max(...groupPositions(spd.group!).map((g) => pub.properties[g]?.houses ?? 0))) {
+            moves.push({ kind: 'SELL_HOUSE', position: pos });
+          }
+        } else if (!prop.mortgaged &&
+          (spd.type !== 'street' || !groupPositions(spd.group!).some((g) => (pub.properties[g]?.houses ?? 0) > 0))) {
+          moves.push({ kind: 'MORTGAGE', position: pos });
+        }
       }
       moves.push({ kind: 'DECLARE_BANKRUPTCY' });
       return moves;
@@ -672,7 +679,10 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
           p.cash >= (sp.houseCost ?? Infinity)) {
           moves.push({ kind: 'BUILD', position: pos });
         }
-        if (prop.houses > 0) moves.push({ kind: 'SELL_HOUSE', position: pos });
+        if (prop.houses > 0 &&
+          prop.houses >= Math.max(...groupPositions(sp.group!).map((g) => pub.properties[g]?.houses ?? 0))) {
+          moves.push({ kind: 'SELL_HOUSE', position: pos });
+        }
         if (!prop.mortgaged && prop.houses === 0 &&
           (sp.type !== 'street' || !groupPositions(sp.group!).some((g) => (pub.properties[g]?.houses ?? 0) > 0))) {
           moves.push({ kind: 'MORTGAGE', position: pos });
