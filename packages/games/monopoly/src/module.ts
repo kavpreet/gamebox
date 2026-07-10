@@ -341,7 +341,7 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
           p.jailTurns += 1;
           if (p.jailTurns >= 3) {
             charge(pub, seat, JAIL_FINE, null);
-            if (pub.phase === ('DEBT' as string)) return; // couldn't pay the fine
+            if ((pub.phase as string) === 'DEBT') return; // couldn't pay the fine
             p.inJail = false;
             p.jailTurns = 0;
             pub.lastEvent = 'paid the fine after 3 tries';
@@ -526,7 +526,7 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
     PROPOSE_TRADE({ state, seat, payload }) {
       const pub = state.public;
       requireManagement(pub, seat);
-      const t = payload as Trade;
+      const t = payload as unknown as Trade;
       const trade: Trade = {
         from: seat,
         to: t.to,
