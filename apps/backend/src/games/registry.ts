@@ -21,6 +21,7 @@ import { catan } from '@gamebox/game-catan';
 import { codenames } from '@gamebox/game-codenames';
 import { azul } from '@gamebox/game-azul';
 import { scattergories } from '@gamebox/game-scattergories';
+import { scrabble } from '@gamebox/game-scrabble';
 
 const modules: GameModule<any, any, any>[] = [
   snakesAndLadders,
@@ -38,6 +39,7 @@ const modules: GameModule<any, any, any>[] = [
   codenames,
   azul,
   scattergories,
+  scrabble,
 ];
 
 for (const m of modules) {
