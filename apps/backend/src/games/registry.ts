@@ -20,6 +20,7 @@ import { monopoly } from '@gamebox/game-monopoly';
 import { catan } from '@gamebox/game-catan';
 import { codenames } from '@gamebox/game-codenames';
 import { azul } from '@gamebox/game-azul';
+import { scattergories } from '@gamebox/game-scattergories';
 
 const modules: GameModule<any, any, any>[] = [
   snakesAndLadders,
@@ -36,6 +37,7 @@ const modules: GameModule<any, any, any>[] = [
   catan,
   codenames,
   azul,
+  scattergories,
 ];
 
 for (const m of modules) {
