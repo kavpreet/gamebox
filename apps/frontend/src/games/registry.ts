@@ -8,6 +8,7 @@ import { rummyUi } from './rummy-ui.js';
 import { checkersUi } from './checkers-ui.js';
 import { riskUi } from './risk-ui.js';
 import { pandemicUi } from './pandemic-ui.js';
+import { monopolyUi } from './monopoly-ui.js';
 
 const uis: GameUi[] = [
   snakesAndLaddersUi,
@@ -20,6 +21,7 @@ const uis: GameUi[] = [
   checkersUi,
   riskUi,
   pandemicUi,
+  monopolyUi,
 ];
 
 const bySlug = new Map(uis.map((u) => [u.slug, u]));

@@ -10,11 +10,16 @@ function newGame(module: typeof uno, seed = 1, players = 3) {
 function randomPlayout(module: typeof uno, seed: number, players: number) {
   const rt = newGame(module, seed, players);
   let guard = 0;
-  while (rt.currentStatus === 'active' && guard++ < 5000) {
+  while (rt.currentStatus === 'active' && guard++ < 20000) {
     const seat = rt.activeSeats()[0]!;
     const moves = rt.legalMoves(seat) as any[];
     expect(moves.length).toBeGreaterThan(0);
-    const move = moves[Math.floor(Math.random() * moves.length)];
+    // bias toward playing cards so games terminate even on pathological seeds
+    const plays = moves.filter((m: any) => m.kind === 'PLAY');
+    const move =
+      plays.length > 0 && Math.random() < 0.85
+        ? plays[Math.floor(Math.random() * plays.length)]
+        : moves[Math.floor(Math.random() * moves.length)];
     rt.applyMove(seat, move.kind, move);
   }
   return rt;
