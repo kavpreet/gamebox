@@ -15,6 +15,7 @@ import { chineseCheckers } from '@gamebox/game-chinese-checkers';
 import { rummy } from '@gamebox/game-rummy';
 import { checkers } from '@gamebox/game-checkers';
 import { risk } from '@gamebox/game-risk';
+import { pandemic } from '@gamebox/game-pandemic';
 
 const modules: GameModule<any, any, any>[] = [
   snakesAndLadders,
@@ -26,6 +27,7 @@ const modules: GameModule<any, any, any>[] = [
   rummy,
   checkers,
   risk,
+  pandemic,
 ];
 
 for (const m of modules) {
