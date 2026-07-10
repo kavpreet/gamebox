@@ -184,6 +184,16 @@ export function buildHttpApp(
     }
   });
 
+  // ── Static SPA (production: backend serves the built frontend) ────────
+  const dist = process.env.FRONTEND_DIST;
+  if (dist) {
+    app.use(express.static(dist));
+    // SPA fallback for client-side routes (/tv, /game/..., /join/...)
+    app.get(/^\/(?!api\/|socket\.io\/|healthz).*/, (_req, res) => {
+      res.sendFile('index.html', { root: dist });
+    });
+  }
+
   // ── Errors ─────────────────────────────────────────────────────────────
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (err instanceof GameServiceError) {
