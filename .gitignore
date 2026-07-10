@@ -10,3 +10,9 @@ build/
 pgdata/
 .vite/
 coverage/
+
+# dev database
+gamebox.dev.sqlite*
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
