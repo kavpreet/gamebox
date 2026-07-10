@@ -4,8 +4,9 @@ Self-hosted family board & card games: the **TV** (a Raspberry Pi in kiosk mode)
 shows the public board, everyone plays from their **phone/tablet** over the LAN
 or the internet. One shared engine, every game is a plugin.
 
-**Games (12):** Snakes & Ladders · Ludo · UNO · UNO Flip · Chess · Chinese
-Checkers · Rummy · Checkers · Risk · Pandemic · Monopoly · Catan
+**Games (17):** Snakes & Ladders · Ludo · UNO · UNO Flip · Chess · Chinese
+Checkers · Rummy · Checkers · Risk · Pandemic · Monopoly · Catan · Codenames ·
+Azul · Scattergories · Scrabble · Pictionary
 
 Full design rationale lives in [`dream/gamebox-plan.md`](dream/gamebox-plan.md).
 
@@ -30,7 +31,7 @@ Open http://localhost:5173 and sign in as `alice@dev.local` / `gamebox-dev-1`
 - 2+ tabs (use private windows for different accounts) = the phones
 - create a game, **Cast here** to the TV, others join with the PIN, start, play.
 
-Tests: `npm test -w apps/backend` (87 tests over the engine + all 12 games).
+Tests: `npm test -w apps/backend` (126 tests over the engine + all 17 games).
 
 ---
 
