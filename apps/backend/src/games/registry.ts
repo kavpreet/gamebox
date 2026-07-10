@@ -11,6 +11,7 @@ import { snakesAndLadders } from '@gamebox/game-snakes-and-ladders';
 import { ludo } from '@gamebox/game-ludo';
 import { uno, unoFlip } from '@gamebox/game-uno';
 import { chess } from '@gamebox/game-chess';
+import { chineseCheckers } from '@gamebox/game-chinese-checkers';
 
 const modules: GameModule<any, any, any>[] = [
   snakesAndLadders,
@@ -18,6 +19,7 @@ const modules: GameModule<any, any, any>[] = [
   uno,
   unoFlip,
   chess,
+  chineseCheckers,
 ];
 
 for (const m of modules) {
