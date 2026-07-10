@@ -1,0 +1,63 @@
+# VPS profile (plan §5.5 Profile A) — paste into Dokploy as a Compose service,
+# or run directly:  docker compose -f infra/docker-compose.yml up -d
+# Dokploy's Domains tab handles Traefik + Let's Encrypt for the `app` service
+# (route your domain → app:3001). Without Dokploy, put Caddy in front (see
+# Caddyfile in this directory).
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    image: gamebox:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://gamebox:${DB_PASSWORD}@postgres:5432/gamebox
+      BASE_URL: ${BASE_URL}
+      BACKEND_URL: ${BASE_URL}
+      AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_EMAIL_PASSWORD_ENABLED: ${AUTH_EMAIL_PASSWORD_ENABLED:-false}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gamebox
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: gamebox
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gamebox"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # nightly local pg_dump (plan §5.3: local only, no offsite copy)
+  pg_backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgbackups:/backups
+    entrypoint: >
+      sh -c 'while true; do
+        pg_dump -h postgres -U gamebox gamebox > /backups/gamebox-$$(date +%F).sql &&
+        find /backups -name "gamebox-*.sql" -mtime +14 -delete;
+        sleep 86400;
+      done'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata: {}
+  pgbackups: {}

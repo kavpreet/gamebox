@@ -1,0 +1,22 @@
+# Podman Quadlet — ~/.config/containers/systemd/gamebox.container
+# Build/push the image first (see infra/Dockerfile), or build locally on the Pi:
+#   podman build -f infra/Dockerfile -t localhost/gamebox:latest .
+# Put non-secret env in ~/.config/gamebox/gamebox.env (see .env.example).
+[Unit]
+Description=GameBox app (LAN profile)
+Requires=gamebox-postgres.service
+After=gamebox-postgres.service
+
+[Container]
+Image=localhost/gamebox:latest
+EnvironmentFile=%h/.config/gamebox/gamebox.env
+Environment=DATABASE_URL=postgres://gamebox:CHANGE_ME@gamebox-postgres:5432/gamebox
+Network=gamebox.network
+PublishPort=3001:3001
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

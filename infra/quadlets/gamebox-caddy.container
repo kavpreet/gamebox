@@ -1,0 +1,23 @@
+# Podman Quadlet — ~/.config/containers/systemd/gamebox-caddy.container
+# HTTPS for the LAN profile (required for Google login + secure cookies + PWA).
+# Uses a DNS-01 cert so no ports are exposed to the internet — see infra/Caddyfile.
+[Unit]
+Description=GameBox Caddy (LAN HTTPS)
+Requires=gamebox.service
+After=gamebox.service
+
+[Container]
+# image with your DNS provider plugin, e.g. cloudflare:
+Image=ghcr.io/caddybuilds/caddy-cloudflare:latest
+Volume=%h/.config/gamebox/Caddyfile:/etc/caddy/Caddyfile:ro
+Volume=gamebox-caddy-data:/data
+Environment=CF_API_TOKEN=CHANGE_ME
+Network=gamebox.network
+PublishPort=443:443
+PublishPort=80:80
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

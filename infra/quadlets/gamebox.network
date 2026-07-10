@@ -1,0 +1,5 @@
+# Podman Quadlet — ~/.config/containers/systemd/gamebox.network
+[Unit]
+Description=GameBox internal network
+
+[Network]

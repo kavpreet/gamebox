@@ -1,0 +1,16 @@
+# LAN profile HTTPS (plan §5.5): a real subdomain DNS'd to your LAN IP, with a
+# DNS-01 certificate so nothing is exposed to the internet.
+#
+# 1. Create a DNS A record:  lan.gamebox.<yourdomain>  →  <LAN IP of the box>
+# 2. Build Caddy with your DNS provider's plugin (example: Cloudflare):
+#      docker run ... caddybuilds/caddy-cloudflare   (or xcaddy build --with github.com/caddy-dns/cloudflare)
+# 3. Set the provider API token via env (CF_API_TOKEN below).
+#
+# Caddy proxies HTTP *and* WebSocket upgrades automatically — no extra config.
+
+lan.gamebox.example.com {
+	tls {
+		dns cloudflare {env.CF_API_TOKEN}
+	}
+	reverse_proxy gamebox:3001
+}

@@ -1,4 +1,32 @@
 import path from 'node:path';
+import fs from 'node:fs';
+
+/**
+ * Minimal .env loader (no dependency): reads `.env` from the working directory
+ * or the repo root, without overriding variables already in the environment.
+ */
+function loadDotEnv(): void {
+  const candidates = [
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(process.cwd(), '../../.env'), // apps/backend → repo root
+  ];
+  for (const file of candidates) {
+    if (!fs.existsSync(file)) continue;
+    for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+      const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+      if (!m) continue;
+      const [, key, raw] = m;
+      if (process.env[key!] !== undefined) continue;
+      let value = raw!;
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      process.env[key!] = value;
+    }
+    break;
+  }
+}
+loadDotEnv();
 
 function bool(v: string | undefined, def: boolean): boolean {
   if (v === undefined || v === '') return def;

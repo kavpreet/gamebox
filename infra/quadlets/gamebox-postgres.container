@@ -1,0 +1,21 @@
+# Podman Quadlet — ~/.config/containers/systemd/gamebox-postgres.container
+# Create the secret once:  printf 'yourpassword' | podman secret create gamebox_db_password -
+[Unit]
+Description=GameBox Postgres (LAN profile)
+
+[Container]
+Image=docker.io/library/postgres:17-alpine
+Volume=gamebox-pgdata:/var/lib/postgresql/data
+Environment=POSTGRES_USER=gamebox
+Environment=POSTGRES_DB=gamebox
+Secret=gamebox_db_password,type=env,target=POSTGRES_PASSWORD
+Network=gamebox.network
+HealthCmd=pg_isready -U gamebox
+HealthInterval=10s
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

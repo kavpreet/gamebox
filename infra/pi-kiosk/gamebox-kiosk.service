@@ -1,0 +1,23 @@
+# systemd --user unit — ~/.config/systemd/user/gamebox-kiosk.service
+# Enable with:
+#   systemctl --user enable --now gamebox-kiosk
+#   loginctl enable-linger pi        # keep it running without an active login
+#
+# The URL is a stable ROOM url (never a game id): the TV self-registers under
+# this room code and follows whatever game a phone casts to it (plan §5.7).
+[Unit]
+Description=GameBox Chromium Kiosk
+After=graphical-session.target network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=GAMEBOX_HEALTH_URL=https://lan.gamebox.example.com/healthz
+ExecStartPre=%h/wait-for-backend.sh
+ExecStart=/usr/bin/chromium --kiosk --noerrdialogs --disable-infobars \
+  --no-first-run --start-maximized --ozone-platform=wayland \
+  "https://lan.gamebox.example.com/tv?room=LIVING_ROOM"
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
