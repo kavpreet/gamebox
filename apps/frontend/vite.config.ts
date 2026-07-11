@@ -8,6 +8,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    host: true, // listen on all interfaces so phones on the LAN can reach it
     proxy: {
       '/api': 'http://localhost:3001',
       '/healthz': 'http://localhost:3001',
