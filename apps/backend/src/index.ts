@@ -8,6 +8,19 @@ import { RoomService } from './services/room-service.js';
 import { buildHttpApp } from './http.js';
 import { setupSockets, getBroadcast, getNotifyRoom } from './sockets.js';
 
+// Node's HTTP internals (and engine.io's polling transport in particular)
+// can throw ERR_HTTP_HEADERS_SENT outside any request handler's try/catch —
+// e.g. when two polling requests race for the same session, or a client
+// aborts mid-response. Left unhandled, that's an uncaught exception that
+// kills the whole process and drops every connected player. Log and keep
+// serving instead of crash-looping mid-game.
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception (server stays up):', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection (server stays up):', reason);
+});
+
 async function main() {
   const db = await getDb();
   await migrateAppTables(db);
