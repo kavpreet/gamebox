@@ -15,6 +15,15 @@ export function getSocket(): Socket {
     reconnection: true,
     reconnectionDelay: 500,
     reconnectionDelayMax: 5000,
+    // Force WebSocket only. The polling transport is what hits the
+    // ERR_HTTP_HEADERS_SENT race in engine.io under concurrent traffic
+    // (see incident 8ad1c81) — skipping it removes that whole bug class.
+    // Trade-off: no polling fallback, so this assumes WS reliably
+    // reaches the origin through Traefik/Cloudflare for every client's
+    // network (confirmed working: Cloudflare WebSockets is enabled).
+    // If any deployment profile can't guarantee WS end-to-end (e.g. a
+    // restrictive corporate/mobile network), this trade needs revisiting.
+    transports: ['websocket'],
   });
 
   socket.on('disconnect', () => {
