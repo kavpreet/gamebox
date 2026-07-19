@@ -71,6 +71,50 @@ describe('uno', () => {
     }
   });
 
+  it('an undeclared one-card player can be caught for 2; declaring UNO makes them safe', () => {
+    const rt = newGame(uno, 6, 3);
+    const state = (rt as any).state as { public: any; private: Record<number, any> };
+    // force seat 1 down to one card
+    const hand = state.private[1].hand;
+    state.private[0].hand.push(...hand.splice(1)); // keep counts consistent-ish
+    state.public.handCounts[1] = 1;
+    state.public.handCounts[0] = state.private[0].hand.length;
+
+    // everyone is active while a catch is possible
+    expect(rt.activeSeats()).toEqual([0, 1, 2]);
+    const catcherMoves = rt.legalMoves(2) as any[];
+    expect(catcherMoves.some((m) => m.kind === 'CATCH_UNO' && m.target === 1)).toBe(true);
+    expect(rt.legalMoves(1).some((m: any) => m.kind === 'DECLARE_UNO')).toBe(true);
+
+    // catch: seat 1 draws 2 and is no longer catchable
+    rt.applyMove(2, 'CATCH_UNO', { target: 1 });
+    const view = rt.view('SPECTATOR') as any;
+    expect(view.handCounts[1]).toBe(3);
+    expect(rt.legalMoves(2).some((m: any) => m.kind === 'CATCH_UNO')).toBe(false);
+
+    // now force seat 2 to one card and let them declare first
+    state.private[0].hand.push(...state.private[2].hand.splice(1));
+    state.public.handCounts[2] = 1;
+    rt.applyMove(2, 'DECLARE_UNO', {});
+    expect((rt.view('SPECTATOR') as any).unoDeclared).toContain(2);
+    expect(() => rt.applyMove(0, 'CATCH_UNO', { target: 2 })).toThrow(/already called/i);
+  });
+
+  it('a stale UNO declaration clears when the hand size changes', () => {
+    const rt = newGame(uno, 15, 2);
+    const state = (rt as any).state as { public: any; private: Record<number, any> };
+    const idle = rt.activeSeats()[0] === 0 ? 1 : 0;
+    state.private[0].hand.push(...state.private[idle].hand.splice(1));
+    state.public.handCounts[idle] = 1;
+    rt.applyMove(idle, 'DECLARE_UNO', {});
+    expect((rt.view('SPECTATOR') as any).unoDeclared).toContain(idle);
+    // any hand-changing move refreshes counts and drops the stale declaration
+    state.private[idle].hand.push(state.private[0].hand.pop());
+    const turn = rt.activeSeats()[0]!;
+    rt.applyMove(turn, 'DRAW', {});
+    expect((rt.view('SPECTATOR') as any).unoDeclared).not.toContain(idle);
+  });
+
   it('kick shuffles the hand back and play continues', () => {
     const rt = newGame(uno, 3, 3);
     const before = (rt.view('SPECTATOR') as any).drawPileSize;
@@ -87,6 +131,24 @@ describe('uno flip', () => {
       const rt = randomPlayout(unoFlip, seed, 3);
       expect(rt.currentStatus).toBe('completed');
     }
+  });
+
+  it('everyone sees the INACTIVE side of every hand (backsides), never the active side', () => {
+    const rt = newGame(unoFlip, 4, 2);
+    const spectator = rt.view('SPECTATOR') as any;
+    expect(spectator.side).toBe('light');
+    expect(spectator.hand).toBeNull();
+    expect(spectator.backsides[0]).toHaveLength(7);
+    expect(spectator.backsides[1]).toHaveLength(7);
+
+    const mine = rt.view(0) as any;
+    expect(mine.hand).toHaveLength(7);
+    // my backside row must be the DARK faces of my cards, not my light faces
+    const state = (rt as any).state as { private: Record<number, any> };
+    const darkFaces = state.private[0].hand.map((c: any) => c.dark);
+    expect(mine.backsides[0]).toEqual(darkFaces);
+    // classic uno has no backsides
+    expect((newGame(uno, 4, 2).view('SPECTATOR') as any).backsides).toBeNull();
   });
 
   it('flip cards toggle the side for every zone at once', () => {

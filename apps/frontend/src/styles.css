@@ -288,6 +288,25 @@ input:focus, select:focus {
   100% { transform: rotate(0) scale(1); }
 }
 
+/* Card motion: draws fly into the hand, plays pop onto the discard,
+   changed counters bump. Keyed remounts trigger these. */
+.deal-in { animation: deal-in 0.35s cubic-bezier(0.2, 1.2, 0.4, 1) both; }
+@keyframes deal-in {
+  from { opacity: 0; transform: translate(30px, -40px) rotate(12deg) scale(0.5); }
+  to { opacity: 1; transform: none; }
+}
+.pop-in { animation: pop-in 0.3s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.55) rotate(-8deg); }
+  to { opacity: 1; transform: none; }
+}
+.count-bump { animation: count-bump 0.4s ease; display: inline-block; }
+@keyframes count-bump {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.35); color: var(--gold); }
+  100% { transform: scale(1); }
+}
+
 /* Event ticker line */
 .event-line {
   text-align: center;
@@ -372,8 +391,13 @@ input:focus, select:focus {
 .game-tile.selected .name { color: var(--text); }
 
 /* ── TV screen ─────────────────────────────────────────────── */
+/* Hard-capped to the viewport: a TV never scrolls — boards letterbox
+   into the available height instead. */
 .tv-screen {
   flex: 1;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   padding: 2vmin;

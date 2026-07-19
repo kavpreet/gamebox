@@ -120,7 +120,9 @@ function Board({ view, size = '100%' }: { view: SnlPublic; size?: string }) {
   const waiting = Object.entries(view.positions).filter(([, p]) => p === 0);
 
   return (
-    <svg viewBox={`0 0 ${W} ${W + (waiting.length ? 34 : 0)}`} style={{ maxWidth: size, maxHeight: '100%', width: '100%' }}>
+    <svg viewBox={`0 0 ${W} ${W + (waiting.length ? 34 : 0)}`}
+      preserveAspectRatio="xMidYMid meet"
+      style={{ maxWidth: size, width: '100%', height: '100%', maxHeight: '100%' }}>
       {cells}
       {links}
       {tokens}

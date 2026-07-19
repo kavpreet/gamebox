@@ -16,9 +16,11 @@ import {
  * carries their actual hand — the view() projection is what keeps the TV and
  * other players from ever seeing card faces (plan §2's key milestone).
  *
- * Deliberate simplifications: no UNO-call penalty, no Wild-Draw-4 challenge,
- * drawn card may be played immediately or the turn passes (no keep-and-play-
- * something-else).
+ * Deliberate simplifications: no Wild-Draw-4 challenge, drawn card may be
+ * played immediately or the turn passes (no keep-and-play-something-else).
+ * The UNO call itself happens out loud at the table; the app enforces it:
+ * a one-card player may tap DECLARE_UNO to become safe, and anyone may
+ * CATCH_UNO an undeclared one-card player for a 2-card penalty.
  */
 
 export interface UnoPublic {
@@ -35,6 +37,12 @@ export interface UnoPublic {
   handCounts: Record<Seat, number>;
   drawPileSize: number;
   lastEvent: string | null;
+  /** who the last event is about (drives "Alice drew a card" lines in the UI) */
+  lastEventSeat: Seat | null;
+  /** the other seat involved (e.g. who got caught), for UI naming */
+  lastEventTarget: Seat | null;
+  /** seats that declared UNO while on one card — safe from CATCH_UNO */
+  unoDeclared: Seat[];
   winner: Seat | null;
 }
 
@@ -45,7 +53,9 @@ export interface UnoPrivate {
 export type UnoMove =
   | { kind: 'PLAY'; card: number; chooseColor?: UnoColor }
   | { kind: 'DRAW' }
-  | { kind: 'PASS' };
+  | { kind: 'PASS' }
+  | { kind: 'DECLARE_UNO' }
+  | { kind: 'CATCH_UNO'; target: Seat };
 
 interface Hidden {
   drawPile: UnoCard[];
@@ -84,6 +94,16 @@ function refreshCounts(state: State): void {
   }
   pub.drawPileSize = hiddenOf(state).drawPile.length;
   pub.discardCount = hiddenOf(state).discard.length;
+  // an UNO declaration only holds while that player still has exactly 1 card
+  pub.unoDeclared = pub.unoDeclared.filter((s) => pub.handCounts[s] === 1);
+}
+
+/** Seats that hold exactly one card and haven't declared UNO — fair game. */
+function catchableSeats(state: State): Seat[] {
+  const pub = state.public;
+  return pub.order.filter(
+    (s) => handOf(state, s).length === 1 && !pub.unoDeclared.includes(s),
+  );
 }
 
 function drawCards(state: State, seat: Seat, count: number, rng: SeededRandom): UnoCard[] {
@@ -203,7 +223,7 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
   return {
     slug: variant,
     displayName: variant === 'uno' ? 'UNO' : 'UNO Flip',
-    rulesVersion: '1.0.0',
+    rulesVersion: '1.1.0',
     minPlayers: 2,
     maxPlayers: 8,
     teams: 'none',
@@ -242,6 +262,9 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
           handCounts,
           drawPileSize: deck.length,
           lastEvent: null,
+          lastEventSeat: null,
+          lastEventTarget: null,
+          unoDeclared: [],
           winner: null,
         },
         private: priv,
@@ -249,8 +272,12 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
     },
 
     activePlayers(state) {
-      if (state.public.winner !== null) return [];
-      return [currentSeat(state.public)];
+      const s = state as State;
+      if (s.public.winner !== null) return [];
+      // While someone is catchable, EVERY seat may act (declare or catch) —
+      // the UI derives whose actual turn it is from order/turnIndex instead.
+      if (catchableSeats(s).length > 0) return [...s.public.order];
+      return [currentSeat(s.public)];
     },
 
     moves: {
@@ -272,7 +299,8 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
         hiddenOf(s).discard.push(card);
         const steps = applyEffect(s, seat, face, chooseColor, rng);
         pub.discardTop = faceOf(card, pub.side);
-        pub.lastEvent = `played ${describeFace(face)}${hand.length === 1 ? ' — UNO!' : ''}`;
+        pub.lastEvent = `played ${describeFace(face)}${hand.length === 1 ? ' — one card left!' : ''}`;
+        pub.lastEventSeat = seat;
         finishPlay(s, seat, steps);
       },
 
@@ -285,6 +313,7 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
         const drawn = drawCards(s, seat, 1, rng);
         refreshCounts(s);
         pub.lastEvent = 'drew a card';
+        pub.lastEventSeat = seat;
         if (drawn.length > 0 && canPlayFace(pub, faceOf(drawn[0]!, pub.side))) {
           pub.phase = 'PLAY_DRAWN_OR_PASS';
         } else {
@@ -300,16 +329,53 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
         if (pub.phase !== 'PLAY_DRAWN_OR_PASS') throw new IllegalMove('You must play or draw');
         pub.phase = 'PLAY';
         pub.lastEvent = 'passed';
+        pub.lastEventSeat = seat;
         stepTurn(pub, 1);
+      },
+
+      DECLARE_UNO({ state, seat }) {
+        const s = state as State;
+        const pub = s.public;
+        if (handOf(s, seat).length !== 1) throw new IllegalMove('You can only call UNO on one card');
+        if (pub.unoDeclared.includes(seat)) throw new IllegalMove('You already called UNO');
+        pub.unoDeclared.push(seat);
+        pub.lastEvent = 'shouted UNO! 🔔';
+        pub.lastEventSeat = seat;
+      },
+
+      CATCH_UNO({ state, seat, payload, rng }) {
+        const s = state as State;
+        const pub = s.public;
+        const { target } = payload as { target: Seat };
+        if (target === seat) throw new IllegalMove("You can't catch yourself");
+        if (!pub.order.includes(target)) throw new IllegalMove('No such player');
+        if (handOf(s, target).length !== 1) throw new IllegalMove('They are not on one card');
+        if (pub.unoDeclared.includes(target)) throw new IllegalMove('They already called UNO');
+        drawCards(s, target, 2, rng);
+        refreshCounts(s);
+        pub.lastEvent = 'CAUGHT_UNO'; // UI formats "X caught Y — +2!"
+        pub.lastEventSeat = seat;
+        pub.lastEventTarget = target;
       },
     },
 
     legalMoves(state, seat) {
       const s = state as State;
       const pub = s.public;
-      if (pub.winner !== null || seat !== currentSeat(pub)) return [];
+      if (pub.winner !== null) return [];
+
+      // out-of-turn calls, available to everyone
+      const calls: UnoMove[] = [];
+      if (handOf(s, seat).length === 1 && !pub.unoDeclared.includes(seat)) {
+        calls.push({ kind: 'DECLARE_UNO' });
+      }
+      for (const target of catchableSeats(s)) {
+        if (target !== seat) calls.push({ kind: 'CATCH_UNO', target });
+      }
+      if (seat !== currentSeat(pub)) return calls;
+
       const hand = handOf(s, seat);
-      const moves: UnoMove[] = [];
+      const moves: UnoMove[] = [...calls];
 
       if (pub.phase === 'PLAY_DRAWN_OR_PASS') {
         const idx = hand.length - 1;
@@ -352,12 +418,22 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
     view(state, viewer) {
       const s = state as State;
       const pub = s.public;
+      // UNO Flip: everyone physically sees the INACTIVE side of every hand —
+      // that's core strategy, so the projection carries it for all viewers.
+      let backsides: Record<Seat, Face[]> | null = null;
+      if (variant === 'uno-flip') {
+        const off = pub.side === 'light' ? 'dark' : 'light';
+        backsides = {};
+        for (const seat of pub.order) {
+          backsides[seat] = handOf(s, seat).map((card) => faceOf(card, off));
+        }
+      }
       if (viewer === 'SPECTATOR' || !(viewer in s.private) || viewer === HIDDEN_ZONE) {
-        return { ...pub, hand: null };
+        return { ...pub, hand: null, backsides };
       }
       // your own hand, with each card's current face + playability precomputed
       const hand = handOf(s, viewer as Seat).map((card) => faceOf(card, pub.side));
-      return { ...pub, hand };
+      return { ...pub, hand, backsides };
     },
 
     disconnectOptions() {
@@ -387,6 +463,7 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
       const cur = wasCurrent ? nextSeat(pub, 1) : currentSeat(pub);
       pub.order.splice(idx, 1);
       delete pub.handCounts[seat];
+      pub.unoDeclared = pub.unoDeclared.filter((s2) => s2 !== seat);
       if (pub.order.length > 0) {
         const ni = pub.order.indexOf(cur);
         pub.turnIndex = ni === -1 ? 0 : ni;
