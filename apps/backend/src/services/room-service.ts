@@ -54,6 +54,16 @@ export class RoomService {
     return { ...room, activeGameId: gameId };
   }
 
+  /** Rooms currently showing a given game (used to clear TVs when it closes). */
+  async roomsShowing(gameId: string): Promise<RoomDTO[]> {
+    const rows = await this.db
+      .selectFrom('rooms')
+      .selectAll()
+      .where('active_game_id', '=', gameId)
+      .execute();
+    return rows.map((r) => this.toDto(r));
+  }
+
   async roomByCode(pairingCode: string): Promise<RoomDTO | null> {
     const row = await this.db
       .selectFrom('rooms')

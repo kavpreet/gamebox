@@ -59,7 +59,7 @@ export function TvPage() {
     }
   }, [joinUrl]);
 
-  if (!state) {
+  if (!state || state.status === 'abandoned') {
     return (
       <div className="idle-screen">
         <h1 className="wordmark">GameBox</h1>

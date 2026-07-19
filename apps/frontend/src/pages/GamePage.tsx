@@ -26,6 +26,7 @@ export function GamePage() {
   const [moveError, setMoveError] = useState('');
   const [vote, setVote] = useState<VoteUpdate | null>(null);
   const [voteEligible, setVoteEligible] = useState<{ seat: Seat; options: DisconnectOption[] } | null>(null);
+  const [confirmClose, setConfirmClose] = useState(false);
   const moveErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -121,6 +122,19 @@ export function GamePage() {
     );
   }
 
+  if (state.status === 'abandoned') {
+    return (
+      <div className="page">
+        <div className="card center">
+          <h3>Game closed</h3>
+          <p className="dim">The host ended this game.</p>
+          <button onClick={() => navigate('/')}>Back home</button>
+        </div>
+      </div>
+    );
+  }
+
+  const isHost = state.summary.createdBy === session?.user.id;
   const ui = getGameUi(state.summary.gameType);
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -135,6 +149,35 @@ export function GamePage() {
         <ui.PlayerView state={state} yourSeat={yourSeat} submitMove={submitMove} />
       ) : (
         <p className="error center">No UI registered for {state.summary.gameType}</p>
+      )}
+
+      <div className="row center-h" style={{ padding: '0 1rem 1.2rem' }}>
+        {state.status === 'completed' ? (
+          <button className="secondary" onClick={() => navigate('/')}>Back home</button>
+        ) : isHost ? (
+          <button className="ghost small" onClick={() => setConfirmClose(true)}>
+            ✕ End this game for everyone
+          </button>
+        ) : null}
+      </div>
+
+      {confirmClose && (
+        <div className="overlay" onClick={() => setConfirmClose(false)}>
+          <div className="card" onClick={(e) => e.stopPropagation()}>
+            <h3>End this game?</h3>
+            <p className="dim">
+              The match ends for everyone and any TV showing it goes back to its idle screen.
+              This can't be undone.
+            </p>
+            <button
+              style={{ background: 'var(--danger)' }}
+              onClick={() => api.abandonGame(gameId!).then(() => navigate('/'))}
+            >
+              End game
+            </button>
+            <button className="ghost" onClick={() => setConfirmClose(false)}>Keep playing</button>
+          </div>
+        </div>
       )}
 
       {voteEligible && !vote && (
@@ -262,7 +305,15 @@ function Lobby({ state, isHost }: { state: LiveState; isHost: boolean }) {
             <div className="row between" key={r.id}>
               <span>📺 {r.name}</span>
               {r.activeGameId === gameId ? (
-                <span className="badge on">showing this game</span>
+                <span className="row" style={{ gap: 6 }}>
+                  <span className="badge on">showing this game</span>
+                  <button
+                    className="ghost"
+                    onClick={() => api.assignRoom(r.pairingCode, null).then(() => api.rooms().then(setRooms))}
+                  >
+                    Disconnect
+                  </button>
+                </span>
               ) : (
                 <button
                   className="secondary"

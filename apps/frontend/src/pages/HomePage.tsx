@@ -134,7 +134,21 @@ export function HomePage() {
               <span>
                 📺 {r.name} <span className="dim small">({r.pairingCode})</span>
               </span>
-              {r.activeGameId ? <Link to={`/game/${r.activeGameId}`}>showing a game</Link> : <span className="dim small">idle</span>}
+              {r.activeGameId ? (
+                <span className="row" style={{ gap: 6 }}>
+                  <Link to={`/game/${r.activeGameId}`}>showing a game</Link>
+                  <button
+                    className="ghost"
+                    onClick={() =>
+                      api.assignRoom(r.pairingCode, null).then(() => api.rooms().then(setRooms))
+                    }
+                  >
+                    Disconnect
+                  </button>
+                </span>
+              ) : (
+                <span className="dim small">idle</span>
+              )}
             </div>
           ))}
         </div>

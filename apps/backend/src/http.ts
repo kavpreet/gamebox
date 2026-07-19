@@ -155,8 +155,14 @@ export function buildHttpApp(
 
   app.post('/api/games/:id/abandon', requireUser, async (req, res, next) => {
     try {
-      await games.abandonGame(String(req.params.id), req.userId!);
-      await onGameChanged(String(req.params.id));
+      const gameId = String(req.params.id);
+      await games.abandonGame(gameId, req.userId!);
+      await onGameChanged(gameId);
+      // free any TVs that were showing this game
+      for (const room of await rooms.roomsShowing(gameId)) {
+        await rooms.assignGame(room.pairingCode, null);
+        await onRoomAssigned(room.pairingCode, null);
+      }
       res.json({ ok: true });
     } catch (err) {
       next(err);
