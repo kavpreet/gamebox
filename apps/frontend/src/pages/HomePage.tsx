@@ -7,7 +7,7 @@ const GAME_ICONS: Record<string, string> = {
   'snakes-and-ladders': '🐍', ludo: '🎲', uno: '🃏', 'uno-flip': '🔄', chess: '♞',
   'chinese-checkers': '⭐', rummy: '🂡', checkers: '⚫', risk: '🌍', pandemic: '🦠',
   monopoly: '🎩', catan: '🏝️', codenames: '🕵️', azul: '🀄', scattergories: '✍️',
-  scrabble: '🔤', pictionary: '🖌️',
+  scrabble: '🔤', pictionary: '🖌️', 'ticket-to-ride': '🚂',
 };
 
 const STATUS_LABELS: Record<string, string> = {

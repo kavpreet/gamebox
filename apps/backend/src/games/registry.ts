@@ -23,6 +23,7 @@ import { azul } from '@gamebox/game-azul';
 import { scattergories } from '@gamebox/game-scattergories';
 import { scrabble } from '@gamebox/game-scrabble';
 import { pictionary } from '@gamebox/game-pictionary';
+import { ticketToRide } from '@gamebox/game-ticket-to-ride';
 
 const modules: GameModule<any, any, any>[] = [
   snakesAndLadders,
@@ -42,6 +43,7 @@ const modules: GameModule<any, any, any>[] = [
   scattergories,
   scrabble,
   pictionary,
+  ticketToRide,
 ];
 
 for (const m of modules) {

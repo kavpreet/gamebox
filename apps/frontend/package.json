@@ -25,6 +25,7 @@
     "@gamebox/game-rummy": "*",
     "@gamebox/game-scattergories": "*",
     "@gamebox/game-scrabble": "*",
+    "@gamebox/game-ticket-to-ride": "*",
     "@gamebox/game-snakes-and-ladders": "*",
     "@gamebox/game-uno": "*",
     "@gamebox/shared-types": "*",
