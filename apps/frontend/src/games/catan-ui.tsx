@@ -4,7 +4,7 @@ import {
   cornersOf, hexCenter, vertexXY, edgeVertices, hexKey, RESOURCES,
 } from '@gamebox/game-catan';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, WinnerBanner } from './common.js';
+import { seatName, SEAT_HEX, WinnerBanner, Prompt, Waiting, EventLine } from './common.js';
 
 type CatanView = CatanPublic & {
   yourResources: Record<Resource, number> | null;
@@ -12,9 +12,12 @@ type CatanView = CatanPublic & {
   yourNewDevCards: DevCard[] | null;
 };
 
-const SEAT_COLORS = ['#e94560', '#2ec4b6', '#f5a623', '#7c5cff'];
+const SEAT_COLORS = SEAT_HEX;
 const TILE_HEX: Record<string, string> = {
   wood: '#2e7d46', brick: '#b3552e', sheep: '#8fce5a', wheat: '#e5c355', ore: '#8b90a8', desert: '#d8c48f',
+};
+const TILE_DARK: Record<string, string> = {
+  wood: '#1f5931', brick: '#8a3f20', sheep: '#6aa63f', wheat: '#c2a338', ore: '#6a6f88', desert: '#b8a476',
 };
 const TILE_EMOJI: Record<string, string> = {
   wood: '🌲', brick: '🧱', sheep: '🐑', wheat: '🌾', ore: '⛰', desert: '🏜',
@@ -70,28 +73,50 @@ function Board({
 
   return (
     <svg viewBox="0 0 680 600" style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
+      <defs>
+        <radialGradient id="catan-sea" cx="50%" cy="45%" r="75%">
+          <stop offset="0%" stopColor="#123056" />
+          <stop offset="100%" stopColor="#0a1a34" />
+        </radialGradient>
+        {Object.keys(TILE_HEX).map((t) => (
+          <linearGradient key={t} id={`tile-${t}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={TILE_HEX[t]} />
+            <stop offset="100%" stopColor={TILE_DARK[t]} />
+          </linearGradient>
+        ))}
+      </defs>
+      <rect width={680} height={600} rx={16} fill="url(#catan-sea)" />
       {view.hexes.map((h) => {
         const key = hexKey(h.q, h.r);
         const c = px(hexCenter(h.q, h.r));
         const clickable = clickHexes?.has(key);
+        const prob = h.token !== null ? 6 - Math.abs(7 - h.token) : 0;
         return (
           <g key={key} onClick={clickable && onHex ? () => onHex(key) : undefined}
             style={clickable ? { cursor: 'pointer' } : undefined}>
-            <polygon points={orderedHexPolygon(h.q, h.r)} fill={TILE_HEX[h.tile]}
-              stroke={clickable ? '#2ec4b6' : '#0f1220'} strokeWidth={clickable ? 4 : 2.5}
-              opacity={0.9} />
-            <text x={c.x} y={c.y - 8} textAnchor="middle" fontSize={18}>{TILE_EMOJI[h.tile]}</text>
+            <polygon points={orderedHexPolygon(h.q, h.r)} fill={`url(#tile-${h.tile})`}
+              stroke={clickable ? '#2ee6c9' : '#0a1a34'} strokeWidth={clickable ? 4.5 : 3} />
+            <text x={c.x} y={c.y - 10} textAnchor="middle" fontSize={19}>{TILE_EMOJI[h.tile]}</text>
             {h.token !== null && (
               <>
-                <circle cx={c.x} cy={c.y + 12} r={13} fill="#f4ecd7" stroke="#0f1220" />
-                <text x={c.x} y={c.y + 17} textAnchor="middle" fontSize={13} fontWeight={800}
-                  fill={h.token === 6 || h.token === 8 ? '#c62828' : '#333'}>
+                <circle cx={c.x} cy={c.y + 13} r={14} fill="#f6efdb" stroke="#0a1a34" strokeWidth={1.5} />
+                <text x={c.x} y={c.y + 16} textAnchor="middle" fontSize={13.5} fontWeight={900}
+                  fill={h.token === 6 || h.token === 8 ? '#c62828' : '#4a4232'}>
                   {h.token}
                 </text>
+                <g>
+                  {Array.from({ length: prob }, (_, i) => (
+                    <circle key={i} cx={c.x - (prob - 1) * 2.2 + i * 4.4} cy={c.y + 23} r={1.4}
+                      fill={h.token === 6 || h.token === 8 ? '#c62828' : '#4a4232'} />
+                  ))}
+                </g>
               </>
             )}
             {view.robber === key && (
-              <text x={c.x} y={c.y + 40} textAnchor="middle" fontSize={22}>🦹</text>
+              <g>
+                <ellipse cx={c.x} cy={c.y + 40} rx={13} ry={6} fill="rgba(0,0,0,0.45)" />
+                <text x={c.x} y={c.y + 42} textAnchor="middle" fontSize={24}>🦹</text>
+              </g>
             )}
           </g>
         );
@@ -118,11 +143,15 @@ function Board({
       {Object.entries(view.buildings).map(([v, b]) => {
         const p = px(vertexXY(v));
         return b.city ? (
-          <rect key={v} x={p.x - 10} y={p.y - 10} width={20} height={20} rx={4}
-            fill={SEAT_COLORS[b.owner % 4]} stroke="#0f1220" strokeWidth={2.5} />
+          <g key={v}>
+            <rect x={p.x - 10} y={p.y - 8} width={20} height={17} rx={3}
+              fill={SEAT_COLORS[b.owner % 4]} stroke="#ffffff" strokeWidth={2} />
+            <path d={`M ${p.x - 11} ${p.y - 8} L ${p.x} ${p.y - 17} L ${p.x + 11} ${p.y - 8} Z`}
+              fill={SEAT_COLORS[b.owner % 4]} stroke="#ffffff" strokeWidth={2} />
+          </g>
         ) : (
           <circle key={v} cx={p.x} cy={p.y} r={9}
-            fill={SEAT_COLORS[b.owner % 4]} stroke="#0f1220" strokeWidth={2.5} />
+            fill={SEAT_COLORS[b.owner % 4]} stroke="#ffffff" strokeWidth={2} />
         );
       })}
       {clickVertices && [...clickVertices].map((v) => {
@@ -255,14 +284,14 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<CatanView, 
         {state.status === 'completed' ? (
           <WinnerBanner state={state} />
         ) : !myTurnish ? (
-          <p className="dim">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</p>
+          <Waiting state={state} />
         ) : view.phase === 'SETUP' ? (
-          <p style={{ color: 'var(--gold)', fontWeight: 700 }}>
+          <Prompt>
             {setupVertex ? 'Now tap an edge for your road' : 'Tap a highlighted corner for your settlement'}
-          </p>
+          </Prompt>
         ) : discardOwed > 0 ? (
           <>
-            <p className="error">Discard {discardOwed} cards ({discardTotal} picked)</p>
+            <Prompt danger>Discard {discardOwed} cards ({discardTotal} picked)</Prompt>
             <div className="row" style={{ justifyContent: 'center' }}>
               {RESOURCES.map((k) => (
                 <button key={k} className="secondary"
@@ -277,15 +306,15 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<CatanView, 
             </div>
           </>
         ) : view.phase === 'ROBBER' ? (
-          <p style={{ color: 'var(--gold)', fontWeight: 700 }}>Move the robber — tap a highlighted hex</p>
+          <Prompt>Move the robber — tap a highlighted hex</Prompt>
         ) : view.pendingTrade && view.pendingTrade.to === yourSeat ? (
           <>
-            <p style={{ color: 'var(--gold)', fontWeight: 700 }}>
+            <Prompt>
               🤝 {seatName(state.summary, view.pendingTrade.from)} offers{' '}
               {RESOURCES.filter((k) => (view.pendingTrade!.give[k] ?? 0) > 0).map((k) => `${view.pendingTrade!.give[k]}${RES_EMOJI[k]}`).join(' ') || 'nothing'}
               {' for '}
               {RESOURCES.filter((k) => (view.pendingTrade!.get[k] ?? 0) > 0).map((k) => `${view.pendingTrade!.get[k]}${RES_EMOJI[k]}`).join(' ') || 'nothing'}
-            </p>
+            </Prompt>
             <div className="row" style={{ justifyContent: 'center' }}>
               <button onClick={() => submitMove('RESPOND_TRADE', { accept: true })}>Accept</button>
               <button className="secondary" onClick={() => submitMove('RESPOND_TRADE', { accept: false })}>Reject</button>
@@ -333,10 +362,10 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<CatanView, 
             )}
           </>
         )}
-        {view.lastEvent && <p className="dim small">{view.lastEvent}</p>}
+        <EventLine text={view.lastEvent} />
       </div>
 
-      <div className="card">
+      <div className="board-frame">
         <Board
           view={view}
           clickVertices={clickVertices}

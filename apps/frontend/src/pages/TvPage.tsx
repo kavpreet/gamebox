@@ -62,9 +62,7 @@ export function TvPage() {
   if (!state) {
     return (
       <div className="idle-screen">
-        <h1>
-          Game<span style={{ color: 'var(--accent)' }}>Box</span>
-        </h1>
+        <h1 className="wordmark">GameBox</h1>
         <p style={{ fontSize: '2.5vmin' }} className="dim">
           This TV is ready. Start a game on your phone and cast it here.
         </p>
@@ -80,11 +78,12 @@ export function TvPage() {
   if (state.status === 'lobby') {
     return (
       <div className="idle-screen">
-        <h1 style={{ fontSize: '3.5vmin' }}>Waiting for players…</h1>
+        <h1 className="wordmark" style={{ fontSize: '4.5vmin' }}>Waiting for players…</h1>
         <div className="pin-display" style={{ fontSize: '9vmin' }}>
           {state.summary.joinPin}
         </div>
-        {qr && <img src={qr} alt="Join QR" style={{ borderRadius: 12, width: '26vmin' }} />}
+        {qr && <img src={qr} alt="Join QR" style={{ borderRadius: 16, width: '26vmin', boxShadow: '0 10px 40px rgba(3,5,16,0.6)' }} />}
+        <p className="dim" style={{ fontSize: '2vmin', marginTop: '-1rem' }}>scan with your phone, or enter the PIN at {window.location.origin}</p>
         <div style={{ display: 'flex', gap: '2vmin', flexWrap: 'wrap', justifyContent: 'center' }}>
           {state.summary.players.map((p) => (
             <div key={p.seat} className="tv-player-chip">
@@ -101,11 +100,11 @@ export function TvPage() {
   return (
     <div className="tv-screen">
       <div className="tv-header">
-        <span>
-          Game<span style={{ color: 'var(--accent)' }}>Box</span>
+        <span className="logo">
+          <span className="wordmark">GameBox</span>
           {state.status === 'paused' && <span style={{ color: 'var(--gold)' }}> — PAUSED</span>}
         </span>
-        {state.summary.joinPin && <span className="dim">PIN {state.summary.joinPin}</span>}
+        {state.summary.joinPin && <span className="dim">join with PIN <strong style={{ color: 'var(--gold)' }}>{state.summary.joinPin}</strong></span>}
       </div>
       {ui ? (
         <ui.TvView state={state} />

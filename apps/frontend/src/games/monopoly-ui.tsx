@@ -2,12 +2,21 @@ import React, { useState } from 'react';
 import type { MonopolyPublic, MonopolyMove } from '@gamebox/game-monopoly';
 import { BOARD, rentFor } from '@gamebox/game-monopoly';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, WinnerBanner } from './common.js';
+import { seatName, SEAT_HEX, WinnerBanner, Prompt, Waiting, Die, EventLine } from './common.js';
 
-const SEAT_COLORS = ['#e94560', '#2ec4b6', '#f5a623', '#7c5cff', '#3fa7ff', '#9ad14b'];
 const GROUP_HEX: Record<string, string> = {
-  brown: '#8b5a2b', 'light-blue': '#7fd4f5', pink: '#e177c1', orange: '#f19b4c',
-  red: '#e23f44', yellow: '#f2e14c', green: '#3fa864', 'dark-blue': '#3558c9',
+  brown: '#96603a', 'light-blue': '#7fd4f5', pink: '#e177c1', orange: '#f19b4c',
+  red: '#e23f44', yellow: '#f2e14c', green: '#3fa864', 'dark-blue': '#4a6fe0',
+};
+
+const CORNER_ART: Record<string, { emoji: string; label: string }> = {
+  go: { emoji: '➡️', label: 'GO' },
+  jail: { emoji: '🔒', label: 'JAIL' },
+  'free-parking': { emoji: '🅿️', label: 'FREE' },
+  'go-to-jail': { emoji: '👮', label: 'GO TO JAIL' },
+};
+const TYPE_EMOJI: Record<string, string> = {
+  chance: '❓', chest: '📦', railroad: '🚂', utility: '💡', tax: '💰',
 };
 
 /** position 0..39 → cell coords on an 11×11 ring (GO bottom-right, counter-clockwise). */
@@ -18,7 +27,7 @@ function cellOf(pos: number): [number, number] {
   return [10, pos - 30];
 }
 
-function Board({ view, mini }: { view: MonopolyPublic; mini?: boolean }) {
+function Board({ view }: { view: MonopolyPublic }) {
   const C = 62;
   const cells: React.ReactElement[] = [];
   BOARD.forEach((sp, pos) => {
@@ -27,22 +36,59 @@ function Board({ view, mini }: { view: MonopolyPublic; mini?: boolean }) {
     const y = cy * C;
     const prop = view.properties[pos];
     const groupColor = sp.group ? GROUP_HEX[sp.group] : null;
+    const corner = CORNER_ART[sp.type];
+    // color band on the inner edge of the cell, facing the center
+    const band = groupColor && (
+      cy === 10 ? <rect x={x + 2} y={y} width={C - 4} height={11} rx={2} fill={groupColor} />
+      : cy === 0 ? <rect x={x + 2} y={y + C - 11} width={C - 4} height={11} rx={2} fill={groupColor} />
+      : cx === 0 ? <rect x={x + C - 11} y={y + 2} width={11} height={C - 4} rx={2} fill={groupColor} />
+      : <rect x={x} y={y + 2} width={11} height={C - 4} rx={2} fill={groupColor} />
+    );
     cells.push(
       <g key={pos}>
-        <rect x={x} y={y} width={C} height={C} fill="#1b2038" stroke="#2c3255" strokeWidth={1.5} />
-        {groupColor && <rect x={x} y={y} width={C} height={10} fill={groupColor} />}
+        <rect x={x + 1} y={y + 1} width={C - 2} height={C - 2} rx={4}
+          fill={corner ? '#222948' : '#1b2140'} stroke="#333c68" strokeWidth={1.2} />
+        {band}
+        {corner ? (
+          <>
+            <text x={x + C / 2} y={y + C / 2 + 2} textAnchor="middle" fontSize={20}>{corner.emoji}</text>
+            <text x={x + C / 2} y={y + C - 8} textAnchor="middle" fontSize={8.5} fontWeight={900}
+              fill="#c9cdea" letterSpacing={0.5}>{corner.label}</text>
+          </>
+        ) : (
+          <>
+            {TYPE_EMOJI[sp.type] && (
+              <text x={x + C / 2} y={y + C / 2 + 10} textAnchor="middle" fontSize={15} opacity={0.9}>
+                {TYPE_EMOJI[sp.type]}
+              </text>
+            )}
+            <text x={x + C / 2} y={y + (groupColor && cy === 10 ? 24 : 20)} textAnchor="middle"
+              fontSize={sp.name.length > 14 ? 6.8 : 8} fontWeight={700} fill="#aab0d6">
+              {sp.name.length > 20 ? sp.name.slice(0, 18) + '…' : sp.name}
+            </text>
+            {sp.price !== undefined && !prop && (
+              <text x={x + C / 2} y={y + C - 15} textAnchor="middle" fontSize={8} fill="#69709c" fontWeight={700}>
+                ${sp.price}
+              </text>
+            )}
+          </>
+        )}
         {prop && (
-          <rect x={x + 2} y={y + C - 8} width={C - 4} height={6} rx={2}
-            fill={SEAT_COLORS[prop.owner % 6]} opacity={prop.mortgaged ? 0.35 : 1} />
+          <rect x={x + 4} y={y + C - 9} width={C - 8} height={5.5} rx={2.5}
+            fill={SEAT_HEX[prop.owner % 6]} opacity={prop.mortgaged ? 0.3 : 1} />
         )}
         {prop && prop.houses > 0 && (
-          <text x={x + C - 6} y={y + 22} textAnchor="end" fontSize={11} fill="#9ad14b" fontWeight={800}>
-            {prop.houses === 5 ? '🏨' : '🏠'.repeat(Math.min(prop.houses, 4))}
-          </text>
+          prop.houses === 5 ? (
+            <rect x={x + C - 20} y={y + 26} width={15} height={10} rx={2} fill="#e23f44" stroke="#0b0e1d" />
+          ) : (
+            <g>
+              {Array.from({ length: prop.houses }, (_, i) => (
+                <rect key={i} x={x + C - 13 - i * 11} y={y + 27} width={8.5} height={8.5} rx={1.5}
+                  fill="#7ed957" stroke="#0b0e1d" />
+              ))}
+            </g>
+          )
         )}
-        <text x={x + C / 2} y={y + C / 2 + 3} textAnchor="middle" fontSize={sp.name.length > 14 ? 7 : 8.5} fill="#9aa0c3">
-          {sp.name.length > 20 ? sp.name.slice(0, 18) + '…' : sp.name}
-        </text>
       </g>,
     );
   });
@@ -58,31 +104,64 @@ function Board({ view, mini }: { view: MonopolyPublic; mini?: boolean }) {
   for (const [pos, seats] of bySpace) {
     const [cx, cy] = cellOf(pos);
     seats.forEach((s, i) => {
+      const tx = cx * C + 13 + (i % 3) * 13;
+      const ty = cy * C + 42 + Math.floor(i / 3) * 6;
       tokens.push(
-        <circle key={s} cx={cx * C + 14 + i * 12} cy={cy * C + 36} r={7}
-          fill={SEAT_COLORS[s % 6]} stroke="#0f1220" strokeWidth={2} />,
+        <g key={s}>
+          <circle cx={tx} cy={ty} r={8.5} fill={SEAT_HEX[s % 6]} stroke="#ffffff" strokeWidth={2} />
+          <circle cx={tx - 2.5} cy={ty - 2.5} r={2.5} fill="rgba(255,255,255,0.55)" />
+        </g>,
       );
     });
   }
 
+  const W = 11 * C;
   return (
-    <svg viewBox={`0 0 ${11 * C} ${11 * C}`} style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
-      <rect width={11 * C} height={11 * C} fill="#141830" />
+    <svg viewBox={`0 0 ${W} ${W}`} style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
+      <defs>
+        <linearGradient id="mono-center" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#173230" />
+          <stop offset="100%" stopColor="#0f2422" />
+        </linearGradient>
+      </defs>
+      <rect width={W} height={W} rx={14} fill="#131836" />
+      <rect x={C} y={C} width={9 * C} height={9 * C} rx={8} fill="url(#mono-center)" stroke="#24504b" strokeWidth={2} />
       {cells}
-      {tokens}
-      {/* center info */}
-      <text x={5.5 * C} y={4.6 * C} textAnchor="middle" fontSize={30} fontWeight={900} fill="#39406e">MONOPOLY</text>
+      <text x={W / 2} y={4.35 * C} textAnchor="middle" fontSize={40} fontWeight={900}
+        fill="#e8b64c" letterSpacing={6} opacity={0.92} style={{ fontFamily: 'Nunito, sans-serif' }}>
+        MONOPOLY
+      </text>
       {view.lastRoll && (
-        <text x={5.5 * C} y={5.5 * C} textAnchor="middle" fontSize={32} fill="#eef0ff">
-          🎲 {view.lastRoll.d1} + {view.lastRoll.d2}
-        </text>
+        <g>
+          {[view.lastRoll.d1, view.lastRoll.d2].map((d, i) => {
+            const dx = W / 2 - 42 + i * 48;
+            const dy = 4.9 * C;
+            const pips: Record<number, [number, number][]> = {
+              1: [[0.5, 0.5]], 2: [[0.25, 0.25], [0.75, 0.75]], 3: [[0.25, 0.25], [0.5, 0.5], [0.75, 0.75]],
+              4: [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]],
+              5: [[0.25, 0.25], [0.75, 0.25], [0.5, 0.5], [0.25, 0.75], [0.75, 0.75]],
+              6: [[0.25, 0.25], [0.75, 0.25], [0.25, 0.5], [0.75, 0.5], [0.25, 0.75], [0.75, 0.75]],
+            };
+            return (
+              <g key={i}>
+                <rect x={dx} y={dy} width={36} height={36} rx={8} fill="#f2f4ff" stroke="#0b0e1d" strokeWidth={1.5} />
+                {(pips[d] ?? []).map(([px, py], j) => (
+                  <circle key={j} cx={dx + px * 36} cy={dy + py * 36} r={3.4} fill="#1a1e38" />
+                ))}
+              </g>
+            );
+          })}
+        </g>
       )}
       {view.lastCard && (
-        <text x={5.5 * C} y={6.3 * C} textAnchor="middle" fontSize={14} fill="#f5a623">{view.lastCard}</text>
+        <text x={W / 2} y={6.35 * C} textAnchor="middle" fontSize={15} fill="#ffb930" fontWeight={700}>
+          {view.lastCard}
+        </text>
       )}
       {view.lastEvent && (
-        <text x={5.5 * C} y={6.9 * C} textAnchor="middle" fontSize={13} fill="#9aa0c3">{view.lastEvent}</text>
+        <text x={W / 2} y={6.9 * C} textAnchor="middle" fontSize={13.5} fill="#8fa0b8">{view.lastEvent}</text>
       )}
+      {tokens}
     </svg>
   );
 }
@@ -98,6 +177,7 @@ function TvView({ state }: TvViewProps<MonopolyPublic>) {
       <div className="tv-sidebar">
         {view.order.map((s) => {
           const p = view.players[s]!;
+          const owned = Object.values(view.properties).filter((pr) => pr.owner === s).length;
           return (
             <div key={s} className={`tv-player-chip ${state.activeSeats.includes(s) ? 'active' : ''}`}
               style={p.bankrupt ? { opacity: 0.4 } : undefined}>
@@ -106,8 +186,9 @@ function TvView({ state }: TvViewProps<MonopolyPublic>) {
                 {seatName(state.summary, s)}
                 {p.inJail && ' 🔒'}
                 {p.bankrupt && ' 💀'}
+                <div className="dim small">{owned} deeds</div>
               </span>
-              <strong>${p.cash}</strong>
+              <strong style={{ color: 'var(--green)' }}>${p.cash}</strong>
             </div>
           );
         })}
@@ -137,6 +218,7 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
   const legal = (state.legalMoves ?? []) as MonopolyMove[];
   const kinds = new Set(legal.map((m) => m.kind));
   const myTurnish = state.activeSeats.includes(yourSeat) && state.status === 'active';
+  const here = BOARD[me.position]!;
 
   const myProps = Object.entries(view.properties)
     .filter(([, p]) => p.owner === yourSeat)
@@ -149,23 +231,41 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
     legal.some((m) => m.kind === kind && (m as { position?: number }).position === pos);
 
   return (
-    <div className="page wide">
-      <div className="card center">
-        <div className="row" style={{ justifyContent: 'center' }}>
-          <span className="badge on">${me.cash}</span>
-          <span className="badge">{BOARD[me.position]!.name}</span>
-          {me.inJail && <span className="badge">🔒 in jail</span>}
-          {me.bankrupt && <span className="badge">💀 bankrupt</span>}
+    <div className="page">
+      {/* status header — the full board lives on the TV */}
+      <div className="card">
+        <div className="row between">
+          <div>
+            <div className="dim small">your cash</div>
+            <div style={{ fontSize: '1.9rem', fontWeight: 900, color: 'var(--green)' }}>${me.cash}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div className="dim small">you are on</div>
+            <div style={{ fontWeight: 800 }}>
+              {here.group && <span style={{ color: GROUP_HEX[here.group] }}>● </span>}
+              {here.name}
+            </div>
+            <div className="row" style={{ justifyContent: 'flex-end', gap: 4 }}>
+              {me.inJail && <span className="badge">🔒 in jail</span>}
+              {me.bankrupt && <span className="badge">💀 bankrupt</span>}
+            </div>
+          </div>
         </div>
+        {view.lastRoll && myTurnish && (
+          <div className="action-bar">
+            <Die value={view.lastRoll.d1} size={44} />
+            <Die value={view.lastRoll.d2} size={44} />
+          </div>
+        )}
 
         {state.status === 'completed' ? (
           <WinnerBanner state={state} />
         ) : !myTurnish ? (
-          <p className="dim">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</p>
+          <Waiting state={state} />
         ) : view.debt?.seat === yourSeat ? (
           <>
-            <p className="error">You owe ${view.debt.amount}! Sell or mortgage below, then settle.</p>
-            <div className="row" style={{ justifyContent: 'center' }}>
+            <Prompt danger>You owe ${view.debt.amount}! Sell or mortgage below, then settle.</Prompt>
+            <div className="action-bar">
               {kinds.has('RESOLVE_DEBT') && <button onClick={() => submitMove('RESOLVE_DEBT', {})}>Pay ${view.debt.amount}</button>}
               <button style={{ background: 'var(--danger)' }} onClick={() => submitMove('DECLARE_BANKRUPTCY', {})}>
                 Declare bankruptcy
@@ -174,10 +274,8 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
           </>
         ) : view.phase === 'AUCTION' && view.auction ? (
           <>
-            <p style={{ color: 'var(--gold)', fontWeight: 700 }}>
-              🔨 Sealed bid for {BOARD[view.auction.position]!.name} (list ${BOARD[view.auction.position]!.price})
-            </p>
-            <div className="row" style={{ justifyContent: 'center' }}>
+            <Prompt>🔨 Sealed bid for {BOARD[view.auction.position]!.name} (list ${BOARD[view.auction.position]!.price})</Prompt>
+            <div className="action-bar">
               <input style={{ width: 120 }} inputMode="numeric" placeholder="0" value={bid} onChange={(e) => setBid(e.target.value)} />
               <button onClick={() => { submitMove('BID', { amount: Number(bid) || 0 }); setBid(''); }}>Bid</button>
               <button className="secondary" onClick={() => submitMove('BID', { amount: 0 })}>Pass</button>
@@ -185,25 +283,25 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
           </>
         ) : view.pendingTrade && view.pendingTrade.to === yourSeat ? (
           <>
-            <p style={{ color: 'var(--gold)', fontWeight: 700 }}>
+            <Prompt>
               🤝 {seatName(state.summary, view.pendingTrade.from)} offers:{' '}
               {view.pendingTrade.giveProps.map((p) => BOARD[p]!.name).join(', ') || 'nothing'}
               {view.pendingTrade.giveCash > 0 && ` + $${view.pendingTrade.giveCash}`}
               {' for your '}
               {view.pendingTrade.getProps.map((p) => BOARD[p]!.name).join(', ') || 'nothing'}
               {view.pendingTrade.getCash > 0 && ` + $${view.pendingTrade.getCash}`}
-            </p>
-            <div className="row" style={{ justifyContent: 'center' }}>
+            </Prompt>
+            <div className="action-bar">
               <button onClick={() => submitMove('RESPOND_TRADE', { accept: true })}>Accept</button>
               <button className="secondary" onClick={() => submitMove('RESPOND_TRADE', { accept: false })}>Reject</button>
             </div>
           </>
         ) : (
-          <div className="row" style={{ justifyContent: 'center' }}>
+          <div className="action-bar">
             {kinds.has('ROLL') && <button className="big" style={{ width: 'auto' }} onClick={() => submitMove('ROLL', {})}>🎲 Roll</button>}
             {kinds.has('PAY_JAIL') && <button className="secondary" onClick={() => submitMove('PAY_JAIL', {})}>Pay $50 fine</button>}
             {kinds.has('BUY') && view.pendingBuy !== null && (
-              <button onClick={() => submitMove('BUY', {})}>
+              <button className="gold" onClick={() => submitMove('BUY', {})}>
                 Buy {BOARD[view.pendingBuy]!.name} (${BOARD[view.pendingBuy]!.price})
               </button>
             )}
@@ -215,10 +313,27 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
             )}
           </div>
         )}
+        <EventLine text={view.lastCard} />
+        <EventLine text={view.lastEvent} />
       </div>
 
+      {/* everyone's standing at a glance */}
       <div className="card">
-        <Board view={view} />
+        <h3>Standings</h3>
+        {view.order.map((s) => {
+          const p = view.players[s]!;
+          return (
+            <div key={s} className="row between" style={p.bankrupt ? { opacity: 0.4 } : undefined}>
+              <span className="row" style={{ gap: 6 }}>
+                <span className={`token seat-color-${s % 6}`} style={{ display: 'inline-block', width: 11, height: 11, borderRadius: 6 }} />
+                {seatName(state.summary, s)}{s === yourSeat && ' (you)'}
+                {p.inJail && ' 🔒'}{p.bankrupt && ' 💀'}
+                {state.activeSeats.includes(s) && <span className="badge gold-badge">turn</span>}
+              </span>
+              <strong style={{ color: 'var(--green)' }}>${p.cash}</strong>
+            </div>
+          );
+        })}
       </div>
 
       {myProps.length > 0 && (

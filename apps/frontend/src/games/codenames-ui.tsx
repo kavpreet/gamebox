@@ -6,28 +6,32 @@ import { seatName, WinnerBanner } from './common.js';
 type CodenamesView = CodenamesPublic & { key: CardKind[] | null };
 
 const TEAM_NAME = ['Red', 'Blue'];
-const TEAM_COLOR = ['#e94560', '#4a7cf7'];
+const TEAM_COLOR = ['#ff4d6d', '#5a8fe8'];
 
 const KIND_BG: Record<CardKind, string> = {
-  team0: '#8c2438',
-  team1: '#2b4a9e',
-  neutral: '#6b6350',
-  assassin: '#0a0a0f',
+  team0: '#c22d4a',
+  team1: '#2b5ac2',
+  neutral: '#8a7f68',
+  assassin: '#08080e',
 };
 
 function cardStyle(revealed: CardKind | null, keyKind: CardKind | null, clickable: boolean): React.CSSProperties {
   return {
-    borderRadius: 8,
+    borderRadius: 10,
     padding: '2.2vmin 0.5vmin',
     textAlign: 'center',
-    fontWeight: 700,
+    fontWeight: 800,
     fontSize: 'clamp(10px, 1.8vmin, 18px)',
     letterSpacing: 0.5,
-    background: revealed ? KIND_BG[revealed] : '#232847',
-    color: revealed ? '#fff' : '#eef0ff',
-    opacity: revealed ? 0.55 : 1,
-    border: keyKind && !revealed ? `3px solid ${KIND_BG[keyKind]}` : '2px solid #333a63',
+    textTransform: 'uppercase',
+    background: revealed
+      ? `linear-gradient(150deg, ${KIND_BG[revealed]}, ${KIND_BG[revealed]}cc)`
+      : 'linear-gradient(150deg, #efe6cd, #ddcda6)',
+    color: revealed ? '#fff' : '#3c3423',
+    border: keyKind && !revealed ? `3px solid ${KIND_BG[keyKind]}` : '2px solid rgba(0,0,0,0.35)',
+    boxShadow: revealed ? 'inset 0 2px 8px rgba(0,0,0,0.35)' : '0 2px 6px rgba(3,5,16,0.4), inset 0 1px 0 rgba(255,255,255,0.5)',
     cursor: clickable ? 'pointer' : 'default',
+    transition: 'transform 0.1s',
     userSelect: 'none',
     overflow: 'hidden',
     textOverflow: 'ellipsis',

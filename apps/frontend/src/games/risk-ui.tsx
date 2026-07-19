@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import type { RiskPublic, RiskMove } from '@gamebox/game-risk';
 import { ADJACENCY } from '@gamebox/game-risk';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, SeatTokens, WinnerBanner } from './common.js';
+import { seatName, SEAT_HEX, SeatTokens, WinnerBanner, Prompt, Waiting } from './common.js';
 
-const SEAT_COLORS = ['#e94560', '#2ec4b6', '#f5a623', '#7c5cff', '#3fa7ff', '#9ad14b'];
+const SEAT_COLORS = SEAT_HEX;
 
 /** Abstract world layout: territory → (x, y) in a 100×72 space. */
 const POS: Record<string, [number, number]> = {
@@ -69,6 +69,13 @@ function Map({
 
   return (
     <svg viewBox="0 0 1000 720" style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
+      <defs>
+        <radialGradient id="risk-bg" cx="50%" cy="40%" r="80%">
+          <stop offset="0%" stopColor="#111a3a" />
+          <stop offset="100%" stopColor="#0a0e24" />
+        </radialGradient>
+      </defs>
+      <rect width={1000} height={720} rx={16} fill="url(#risk-bg)" />
       {edges}
       {Object.entries(POS).map(([t, [x, y]]) => {
         const terr = view.territories[t]!;
@@ -77,16 +84,23 @@ function Map({
         return (
           <g key={t} onClick={onTerritory ? () => onTerritory(t) : undefined}
             style={onTerritory ? { cursor: 'pointer' } : undefined}>
+            {isHi && (
+              <circle cx={x * SCALE} cy={y * SCALE} r={29} fill="none" stroke="#2ee6c9" strokeWidth={3.5}>
+                <animate attributeName="r" values="27;31;27" dur="1.3s" repeatCount="indefinite" />
+              </circle>
+            )}
+            <circle cx={x * SCALE} cy={y * SCALE + 3} r={22} fill="rgba(0,0,0,0.4)" />
             <circle cx={x * SCALE} cy={y * SCALE} r={22}
               fill={SEAT_COLORS[terr.owner % 6]}
-              stroke={isSel ? '#ffffff' : isHi ? '#2ec4b6' : '#0f1220'}
-              strokeWidth={isSel || isHi ? 5 : 2}
+              stroke={isSel ? '#ffffff' : '#0a0e24'}
+              strokeWidth={isSel ? 5 : 2}
               opacity={view.eliminated.includes(terr.owner) ? 0.35 : 1}
             />
-            <text x={x * SCALE} y={y * SCALE + 7} textAnchor="middle" fontSize={20} fontWeight={800} fill="#0f1220">
+            <circle cx={x * SCALE - 7} cy={y * SCALE - 7} r={6} fill="rgba(255,255,255,0.3)" />
+            <text x={x * SCALE} y={y * SCALE + 7} textAnchor="middle" fontSize={20} fontWeight={900} fill="#0a0e24">
               {terr.armies}
             </text>
-            <text x={x * SCALE} y={y * SCALE + 42} textAnchor="middle" fontSize={13} fill="#9aa0c3">
+            <text x={x * SCALE} y={y * SCALE + 42} textAnchor="middle" fontSize={13} fontWeight={700} fill="#8f97c4">
               {NICE[t]}
             </text>
           </g>
@@ -176,12 +190,10 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<RiskPublic,
         {state.status === 'completed' ? (
           <WinnerBanner state={state} />
         ) : !myTurn ? (
-          <p className="dim">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</p>
+          <Waiting state={state} />
         ) : pc ? (
           <>
-            <p style={{ color: 'var(--gold)', fontWeight: 700 }}>
-              Conquered {NICE[pc.to]}! Move in how many armies? (min {pc.minMove})
-            </p>
+            <Prompt>Conquered {NICE[pc.to]}! Move in how many armies? (min {pc.minMove})</Prompt>
             <div className="row" style={{ justifyContent: 'center' }}>
               {Array.from(
                 { length: Math.max(0, view.territories[pc.from]!.armies - pc.minMove) + 0 },
@@ -201,11 +213,11 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<RiskPublic,
           </>
         ) : (
           <>
-            <p style={{ color: 'var(--gold)', fontWeight: 700 }}>
+            <Prompt>
               {phase === 'REINFORCE' && `Place armies — tap your territories (${view.reinforcementsLeft} left)`}
               {phase === 'ATTACK' && (selected ? `Attacking from ${NICE[selected]} — tap a highlighted enemy` : 'Attack — tap one of your territories (2+ armies)')}
               {phase === 'FORTIFY' && (selected ? `Fortifying from ${NICE[selected]} — tap a highlighted friendly` : 'Fortify (optional) — tap a territory, or end your turn')}
-            </p>
+            </Prompt>
             <div className="row" style={{ justifyContent: 'center' }}>
               {phase === 'ATTACK' && selected && (
                 <div className="row">
@@ -235,7 +247,7 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<RiskPublic,
           </p>
         )}
       </div>
-      <div className="card">
+      <div className="board-frame">
         <Map view={view} selected={selected} highlights={highlights} onTerritory={onTerritory} />
       </div>
     </div>

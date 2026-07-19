@@ -32,7 +32,10 @@ function TvView({ state }: TvViewProps<ScatView>) {
       <div className="tv-board" style={{ flexDirection: 'column', gap: '2vmin', padding: '3vmin', justifyContent: 'flex-start', overflow: 'auto' }}>
         <h2 style={{ margin: 0 }}>
           Round {view.round}/{view.totalRounds} — letter{' '}
-          <span style={{ color: 'var(--gold)', fontSize: '1.6em' }}>{view.letter}</span>
+          <span style={{
+            color: 'var(--gold)', fontSize: '1.8em', fontWeight: 900,
+            textShadow: '0 0 24px rgba(255,185,48,0.5)',
+          }}>{view.letter}</span>
         </h2>
         {view.phase === 'ANSWER' && (
           <>
@@ -196,8 +199,8 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<ScatView, S
       )}
       {state.status === 'active' && submitted && (
         <div className="card">
-          <p className="dim center">
-            Waiting for {view.order.filter((s) => !view.submitted.includes(s)).map((s) => seatName(state.summary, s)).join(', ')}…
+          <p className="waiting">
+            ✓ Submitted — waiting for {view.order.filter((s) => !view.submitted.includes(s)).map((s) => seatName(state.summary, s)).join(', ')}
           </p>
         </div>
       )}

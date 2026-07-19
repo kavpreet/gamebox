@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import type { CCPublic, CCMove } from '@gamebox/game-chinese-checkers';
 import { allCells, destinations } from '@gamebox/game-chinese-checkers';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, SeatTokens, WinnerBanner } from './common.js';
+import { seatName, SEAT_HEX, SeatTokens, WinnerBanner, Prompt, Waiting } from './common.js';
 
-const SEAT_COLORS = ['#e94560', '#2ec4b6', '#f5a623', '#7c5cff', '#3fa7ff', '#9ad14b'];
+const SEAT_COLORS = SEAT_HEX;
 const R = 16; // hole radius in svg units
 const SP = 38; // spacing
 
@@ -38,6 +38,13 @@ function Board({
       viewBox={`${-EXTENT} ${-EXTENT} ${2 * EXTENT} ${2 * EXTENT}`}
       style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}
     >
+      <defs>
+        <radialGradient id="cc-bg" cx="50%" cy="45%" r="75%">
+          <stop offset="0%" stopColor="#22284a" />
+          <stop offset="100%" stopColor="#121631" />
+        </radialGradient>
+      </defs>
+      <circle cx={0} cy={0} r={EXTENT * 0.98} fill="url(#cc-bg)" stroke="#333c68" strokeWidth={3} />
       {CELLS.map((cell) => {
         const { px, py } = xy(cell);
         const owner = view.pegs[cell];
@@ -46,12 +53,19 @@ function Board({
         const wasLast = view.lastMove && (view.lastMove.from === cell || view.lastMove.to === cell);
         return (
           <g key={cell} onClick={onCell ? () => onCell(cell) : undefined} style={onCell ? { cursor: 'pointer' } : undefined}>
+            {/* hole */}
+            <circle cx={px} cy={py + 1.5} r={R} fill="rgba(0,0,0,0.5)" />
             <circle cx={px} cy={py} r={R}
-              fill={owner !== undefined ? SEAT_COLORS[owner % 6] : '#1b2038'}
-              stroke={isSel ? '#ffffff' : isTarget ? '#2ec4b6' : wasLast ? '#f5a623' : '#2c3255'}
+              fill={owner !== undefined ? SEAT_COLORS[owner % 6] : '#0d1024'}
+              stroke={isSel ? '#ffffff' : isTarget ? '#2ee6c9' : wasLast ? '#ffb930' : '#333c68'}
               strokeWidth={isSel || isTarget ? 3.5 : 1.5}
             />
-            {isTarget && owner === undefined && <circle cx={px} cy={py} r={R * 0.35} fill="rgba(46,196,182,0.7)" />}
+            {owner !== undefined && <circle cx={px - R * 0.3} cy={py - R * 0.3} r={R * 0.28} fill="rgba(255,255,255,0.4)" />}
+            {isTarget && owner === undefined && (
+              <circle cx={px} cy={py} r={R * 0.35} fill="rgba(46,230,201,0.8)">
+                <animate attributeName="r" values={`${R * 0.28};${R * 0.42};${R * 0.28}`} dur="1.2s" repeatCount="indefinite" />
+              </circle>
+            )}
           </g>
         );
       })}
@@ -105,14 +119,12 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<CCPublic, C
         {state.status === 'completed' ? (
           <WinnerBanner state={state} />
         ) : myTurn ? (
-          <p style={{ color: 'var(--gold)', fontWeight: 700 }}>
-            {selected ? 'Tap a highlighted hole' : 'Your turn — tap one of your pegs'}
-          </p>
+          <Prompt>{selected ? 'Tap a highlighted hole' : 'Your turn — tap one of your pegs'}</Prompt>
         ) : (
-          <p className="dim">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</p>
+          <Waiting state={state} />
         )}
       </div>
-      <div className="card">
+      <div className="board-frame">
         <Board view={view} yourSeat={yourSeat} selected={selected} targets={targets} onCell={onCell} />
       </div>
     </div>

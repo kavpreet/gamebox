@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import type { AzulPublic, AzulMove, PlayerBoard, TileColor } from '@gamebox/game-azul';
 import { wallColor } from '@gamebox/game-azul';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, WinnerBanner } from './common.js';
+import { seatName, WinnerBanner, Prompt, Waiting } from './common.js';
 
 const TILE_COLORS = ['#4a7cf7', '#f5d547', '#e94560', '#2b2b35', '#3ec8c0'];
 const TILE_NAMES = ['blue', 'yellow', 'red', 'black', 'teal'];
@@ -20,16 +20,22 @@ function Tile({ color, size = 24, dim, onClick, selected }: {
       style={{
         width: size,
         height: size,
-        borderRadius: 5,
-        background: color === 'first' ? '#eef0ff' : TILE_COLORS[color],
-        border: selected ? '3px solid #f5a623' : '1px solid #11131f',
-        opacity: dim ? 0.25 : 1,
+        borderRadius: 6,
+        background: color === 'first'
+          ? 'linear-gradient(150deg, #ffffff, #d8dcf0)'
+          : `linear-gradient(150deg, ${TILE_COLORS[color]}, ${TILE_COLORS[color]}bb)`,
+        border: selected ? '3px solid #ffb930' : '1px solid rgba(0,0,0,0.55)',
+        boxShadow: dim ? 'none' : 'inset 0 2px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.25), 0 1px 3px rgba(3,5,16,0.5)',
+        opacity: dim ? 0.22 : 1,
         cursor: onClick ? 'pointer' : 'default',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         fontSize: size * 0.5,
+        fontWeight: 900,
+        color: '#22263e',
         flexShrink: 0,
+        transition: 'transform 0.1s',
       }}
     >
       {color === 'first' ? '1' : ''}
@@ -214,11 +220,11 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<AzulPublic,
         {state.status === 'completed' ? (
           <WinnerBanner state={state} />
         ) : myTurn ? (
-          <p className="center" style={{ color: 'var(--gold)', fontWeight: 700 }}>
+          <Prompt>
             {sel ? `Now tap a pattern line (or the floor) for the ${TILE_NAMES[sel.color]} tiles` : 'Your turn — tap a tile to pick a color'}
-          </p>
+          </Prompt>
         ) : (
-          <p className="dim center">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</p>
+          <Waiting state={state} />
         )}
         <Factories view={view} selected={sel} onPick={myTurn ? (source, color) => setSel({ source, color }) : undefined} />
       </div>

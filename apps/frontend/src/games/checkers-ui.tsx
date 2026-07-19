@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import type { CheckersPublic, CheckersMove } from '@gamebox/game-checkers';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, SeatTokens, WinnerBanner } from './common.js';
+import { SEAT_HEX, SeatTokens, WinnerBanner, Prompt, Waiting } from './common.js';
 
-const SEAT_COLORS = ['#e94560', '#2ec4b6'];
+const SEAT_COLORS = SEAT_HEX;
 
 function Board({
   view,
@@ -37,15 +37,21 @@ function Board({
         <g key={name} onClick={onSquare && dark ? () => onSquare(name) : undefined}
           style={onSquare && dark ? { cursor: 'pointer' } : undefined}>
           <rect x={x} y={y} width={C} height={C}
-            fill={isSel ? '#f5a623' : isLast ? '#4a5387' : dark ? '#232847' : '#39406e'} />
-          {isTarget && <circle cx={x + C / 2} cy={y + C / 2} r={C * 0.16} fill="rgba(46,196,182,0.6)" />}
+            fill={dark ? '#7a4a2d' : '#e8d3ae'} />
+          {isLast && <rect x={x} y={y} width={C} height={C} fill="rgba(255,185,48,0.35)" />}
+          {isSel && <rect x={x} y={y} width={C} height={C} fill="rgba(255,185,48,0.6)" />}
+          {isTarget && <circle cx={x + C / 2} cy={y + C / 2} r={C * 0.16} fill="rgba(46,230,201,0.75)" />}
           {piece && (
             <>
-              <circle cx={x + C / 2} cy={y + C / 2} r={C * 0.36}
+              <circle cx={x + C / 2} cy={y + C / 2 + 2.5} r={C * 0.37} fill="rgba(0,0,0,0.4)" />
+              <circle cx={x + C / 2} cy={y + C / 2} r={C * 0.37}
                 fill={SEAT_COLORS[piece.seat % 2]}
-                stroke={isFrom ? '#ffffff' : '#0f1220'} strokeWidth={isFrom ? 3 : 2} />
+                stroke={isFrom ? '#ffffff' : 'rgba(0,0,0,0.5)'} strokeWidth={isFrom ? 3 : 2} />
+              <circle cx={x + C / 2} cy={y + C / 2} r={C * 0.26} fill="none"
+                stroke="rgba(0,0,0,0.25)" strokeWidth={2} />
+              <circle cx={x + C / 2 - 6} cy={y + C / 2 - 7} r={C * 0.09} fill="rgba(255,255,255,0.35)" />
               {piece.king && (
-                <text x={x + C / 2} y={y + C / 2 + 7} textAnchor="middle" fontSize={22} fill="#0f1220" fontWeight={900}>♛</text>
+                <text x={x + C / 2} y={y + C / 2 + 7} textAnchor="middle" fontSize={22} fill="#3c2500" fontWeight={900}>♛</text>
               )}
             </>
           )}
@@ -53,7 +59,13 @@ function Board({
       );
     }
   }
-  return <svg viewBox={`0 0 ${8 * C} ${8 * C}`} style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>{cells}</svg>;
+  const M = 10;
+  return (
+    <svg viewBox={`${-M} ${-M} ${8 * C + M * 2} ${8 * C + M * 2}`} style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
+      <rect x={-M} y={-M} width={8 * C + M * 2} height={8 * C + M * 2} rx={10} fill="#241a12" />
+      {cells}
+    </svg>
+  );
 }
 
 function TvView({ state }: TvViewProps<CheckersPublic>) {
@@ -102,14 +114,14 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<CheckersPub
         {state.status === 'completed' ? (
           <WinnerBanner state={state} />
         ) : myTurn ? (
-          <p style={{ color: 'var(--gold)', fontWeight: 700 }}>
+          <Prompt>
             {view.chain ? 'Keep jumping!' : mustCapture ? 'Your turn — a capture is forced' : 'Your turn'}
-          </p>
+          </Prompt>
         ) : (
-          <p className="dim">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</p>
+          <Waiting state={state} />
         )}
       </div>
-      <div className="card">
+      <div className="board-frame">
         <Board view={view} flipped={yourSeat === 1} selected={selected} targets={targets}
           froms={myTurn ? froms : undefined} onSquare={onSquare} />
       </div>

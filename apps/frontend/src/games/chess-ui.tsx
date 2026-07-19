@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { ChessPublic, ChessMove } from '@gamebox/game-chess';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, SeatTokens, WinnerBanner } from './common.js';
+import { SeatTokens, WinnerBanner, Prompt, Waiting } from './common.js';
 
 const PIECES: Record<string, string> = {
   wk: '♔', wq: '♕', wr: '♖', wb: '♗', wn: '♘', wp: '♙',
@@ -57,11 +57,24 @@ function Board({
 }) {
   const squares = parseFen(view.fen);
   const C = 60;
+  const M = 22; // margin for coordinates
+  const W = 8 * C + M * 2;
   return (
-    <svg viewBox={`0 0 ${8 * C} ${8 * C}`} style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
+    <svg viewBox={`0 0 ${W} ${W}`} style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
+      <rect width={W} height={W} rx={10} fill="#241a12" />
+      {Array.from({ length: 8 }, (_, i) => {
+        const fileCh = String.fromCharCode(97 + (flipped ? 7 - i : i));
+        const rankCh = String(flipped ? i + 1 : 8 - i);
+        return (
+          <g key={i} fill="#8a7358" fontSize={11.5} fontWeight={700}>
+            <text x={M + i * C + C / 2} y={W - 7} textAnchor="middle">{fileCh}</text>
+            <text x={10} y={M + i * C + C / 2 + 4} textAnchor="middle">{rankCh}</text>
+          </g>
+        );
+      })}
       {squares.map((s) => {
-        const x = (flipped ? 7 - s.file : s.file) * C;
-        const y = (flipped ? s.rank : 7 - s.rank) * C;
+        const x = (flipped ? 7 - s.file : s.file) * C + M;
+        const y = (flipped ? s.rank : 7 - s.rank) * C + M;
         const light = (s.file + s.rank) % 2 === 1;
         const isLast = view.lastMove && (view.lastMove.from === s.name || view.lastMove.to === s.name);
         const isSel = selected === s.name;
@@ -69,13 +82,16 @@ function Board({
         return (
           <g key={s.name} onClick={onSquare ? () => onSquare(s.name) : undefined} style={onSquare ? { cursor: 'pointer' } : undefined}>
             <rect x={x} y={y} width={C} height={C}
-              fill={isSel ? '#f5a623' : isLast ? '#4a5387' : light ? '#39406e' : '#232847'} />
-            {isTarget && <circle cx={x + C / 2} cy={y + C / 2} r={s.piece ? C * 0.44 : C * 0.16}
-              fill={s.piece ? 'none' : 'rgba(46,196,182,0.55)'} stroke={s.piece ? 'rgba(46,196,182,0.8)' : 'none'} strokeWidth={4} />}
+              fill={light ? '#e8d3ae' : '#9d6b43'} />
+            {isLast && <rect x={x} y={y} width={C} height={C} fill="rgba(255,185,48,0.4)" />}
+            {isSel && <rect x={x} y={y} width={C} height={C} fill="rgba(255,185,48,0.65)" />}
+            {isTarget && <circle cx={x + C / 2} cy={y + C / 2} r={s.piece ? C * 0.44 : C * 0.15}
+              fill={s.piece ? 'none' : 'rgba(38,120,100,0.6)'} stroke={s.piece ? 'rgba(38,120,100,0.8)' : 'none'} strokeWidth={4.5} />}
             {s.piece && (
-              <text x={x + C / 2} y={y + C * 0.72} textAnchor="middle" fontSize={C * 0.72}
-                fill={s.piece[0] === 'w' ? '#f4f6ff' : '#0c0e1c'}
-                stroke={s.piece[0] === 'w' ? '#0c0e1c' : '#4a5387'} strokeWidth={0.8}>
+              <text x={x + C / 2} y={y + C * 0.74} textAnchor="middle" fontSize={C * 0.76}
+                fill={s.piece[0] === 'w' ? '#fdfdf8' : '#1c1512'}
+                stroke={s.piece[0] === 'w' ? '#3a2c20' : '#00000055'} strokeWidth={1}
+                style={{ filter: 'drop-shadow(0 2px 1.5px rgba(0,0,0,0.35))' }}>
                 {PIECES[s.piece]}
               </text>
             )}
@@ -142,14 +158,14 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<ChessPublic
             <WinnerBanner state={state} />
           </>
         ) : myTurn ? (
-          <p style={{ color: 'var(--gold)', fontWeight: 700 }}>
-            Your move ({yourSeat === 0 ? 'White' : 'Black'}){view.inCheck ? ' — you are in check!' : ''}
-          </p>
+          <Prompt danger={view.inCheck}>
+            Your move ({yourSeat === 0 ? '♔ White' : '♚ Black'}){view.inCheck ? ' — you are in check!' : ''}
+          </Prompt>
         ) : (
-          <p className="dim">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</p>
+          <Waiting state={state} />
         )}
       </div>
-      <div className="card">
+      <div className="board-frame">
         <Board
           view={view}
           flipped={yourSeat === 1}

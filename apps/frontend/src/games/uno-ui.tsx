@@ -1,17 +1,24 @@
 import React, { useState } from 'react';
 import type { UnoPublic, UnoMove, Face, UnoColor } from '@gamebox/game-uno';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, WinnerBanner } from './common.js';
+import { seatName, WinnerBanner, Prompt, Waiting, EventLine } from './common.js';
 
 /** Player view additionally carries `hand` (the projection adds it). */
 type UnoView = UnoPublic & { hand: Face[] | null };
 
 const COLOR_HEX: Record<string, string> = {
-  R: '#e94560',
+  R: '#e8355c',
   Y: '#f5a623',
   G: '#2ec46f',
-  B: '#3fa7ff',
+  B: '#3f8dff',
   W: '#232847',
+};
+const COLOR_DARK: Record<string, string> = {
+  R: '#b01f42',
+  Y: '#c77f12',
+  G: '#1d9a52',
+  B: '#2a63c4',
+  W: '#15182e',
 };
 const COLOR_NAME: Record<string, string> = { R: 'Red', Y: 'Yellow', G: 'Green', B: 'Blue' };
 
@@ -43,31 +50,40 @@ function CardFace({
   dark?: boolean;
 }) {
   const label = VALUE_LABEL[face.value] ?? face.value;
+  const isWild = face.color === 'W';
+  const bg = isWild
+    ? 'conic-gradient(from 45deg, #e8355c 0 25%, #f5a623 0 50%, #2ec46f 0 75%, #3f8dff 0)'
+    : `linear-gradient(150deg, ${COLOR_HEX[face.color]}, ${COLOR_DARK[face.color]})`;
   return (
     <div
       onClick={disabled ? undefined : onClick}
+      className={`hand-card${onClick && !disabled ? ' clickable' : ''}`}
       style={{
+        position: 'relative',
         width: big ? '16vmin' : 54,
         height: big ? '24vmin' : 80,
         minWidth: big ? 90 : undefined,
         minHeight: big ? 135 : undefined,
-        borderRadius: 10,
-        background: COLOR_HEX[face.color] ?? '#232847',
-        border: dark ? '3px solid #7c5cff' : '3px solid rgba(255,255,255,0.85)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: big ? '6vmin' : 26,
-        fontWeight: 800,
+        background: bg,
+        border: dark ? '3px solid #8b6cff' : '3px solid rgba(255,255,255,0.9)',
+        fontSize: big ? '5vmin' : 22,
         color: 'white',
-        textShadow: '0 1px 3px rgba(0,0,0,0.55)',
-        cursor: onClick && !disabled ? 'pointer' : 'default',
+        textShadow: '0 2px 3px rgba(0,0,0,0.55)',
         opacity: disabled ? 0.35 : 1,
-        userSelect: 'none',
-        flexShrink: 0,
+        overflow: 'hidden',
       }}
     >
-      {label}
+      {/* center oval, classic uno style */}
+      <div style={{
+        position: 'absolute', inset: '12% 8%',
+        borderRadius: '50%',
+        transform: 'rotate(-28deg)',
+        background: 'rgba(255,255,255,0.16)',
+        border: '2px solid rgba(255,255,255,0.55)',
+      }} />
+      <span style={{ position: 'relative', fontWeight: 900 }}>{label}</span>
+      <span style={{ position: 'absolute', top: 4, left: 7, fontSize: big ? '2vmin' : 11, fontWeight: 900 }}>{label}</span>
+      <span style={{ position: 'absolute', bottom: 4, right: 7, fontSize: big ? '2vmin' : 11, fontWeight: 900, transform: 'rotate(180deg)' }}>{label}</span>
     </div>
   );
 }
@@ -166,13 +182,11 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<UnoView, Un
         {state.status === 'completed' ? (
           <WinnerBanner state={state} />
         ) : myTurn ? (
-          <p style={{ color: 'var(--gold)', fontWeight: 700 }}>
-            {view.phase === 'PLAY_DRAWN_OR_PASS' ? 'Play the drawn card or pass' : 'Your turn!'}
-          </p>
+          <Prompt>{view.phase === 'PLAY_DRAWN_OR_PASS' ? 'Play the drawn card or pass' : 'Your turn!'}</Prompt>
         ) : (
-          <p className="dim">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</p>
+          <Waiting state={state} />
         )}
-        {view.lastEvent && <p className="dim small">{view.lastEvent}</p>}
+        <EventLine text={view.lastEvent} />
       </div>
 
       {view.hand && (

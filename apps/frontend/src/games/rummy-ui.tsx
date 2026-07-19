@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import type { RummyPublic, RummyMove, Card, Meld } from '@gamebox/game-rummy';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, WinnerBanner } from './common.js';
+import { seatName, WinnerBanner, Prompt, Waiting, EventLine } from './common.js';
 
 type RummyView = RummyPublic & { hand: Card[] | null };
 
 const SUIT_GLYPH: Record<string, string> = { S: '♠', H: '♥', D: '♦', C: '♣' };
-const SUIT_COLOR: Record<string, string> = { S: '#eef0ff', H: '#e94560', D: '#e94560', C: '#eef0ff' };
+const SUIT_COLOR: Record<string, string> = { S: '#22263e', H: '#d22c4c', D: '#d22c4c', C: '#22263e' };
 const RANK_LABEL = (r: number) => (r === 1 ? 'A' : r === 11 ? 'J' : r === 12 ? 'Q' : r === 13 ? 'K' : String(r));
 
 function PlayingCard({
@@ -25,29 +25,25 @@ function PlayingCard({
   return (
     <div
       onClick={onClick}
+      className={`hand-card${onClick ? ' clickable' : ''}${selected ? ' lifted' : ''}`}
       style={{
+        position: 'relative',
         width: small ? 38 : 52,
         height: small ? 54 : 74,
-        borderRadius: 8,
-        background: selected ? '#39406e' : '#232847',
-        border: selected ? '2.5px solid #f5a623' : '2px solid #333a63',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontWeight: 800,
-        fontSize: small ? 14 : 18,
+        background: 'linear-gradient(150deg, #ffffff, #e9ebf5)',
+        border: '1px solid #b9bed6',
+        fontSize: small ? 13 : 17,
         color: SUIT_COLOR[card.suit],
-        cursor: onClick ? 'pointer' : 'default',
         opacity: faded ? 0.45 : 1,
-        userSelect: 'none',
-        flexShrink: 0,
-        transform: selected ? 'translateY(-6px)' : 'none',
-        transition: 'transform 0.1s',
       }}
     >
-      <span>{RANK_LABEL(card.rank)}</span>
-      <span>{SUIT_GLYPH[card.suit]}</span>
+      <span style={{ position: 'absolute', top: 2, left: 4, fontSize: small ? 10 : 12, fontWeight: 900, lineHeight: 1 }}>
+        {RANK_LABEL(card.rank)}<br />{SUIT_GLYPH[card.suit]}
+      </span>
+      <span style={{ fontSize: small ? 18 : 26 }}>{SUIT_GLYPH[card.suit]}</span>
+      <span style={{ position: 'absolute', bottom: 2, right: 4, fontSize: small ? 10 : 12, fontWeight: 900, lineHeight: 1, transform: 'rotate(180deg)' }}>
+        {RANK_LABEL(card.rank)}<br />{SUIT_GLYPH[card.suit]}
+      </span>
     </div>
   );
 }
@@ -174,13 +170,11 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<RummyView, 
         {state.status === 'completed' ? (
           <WinnerBanner state={state} />
         ) : myTurn ? (
-          <p className="center" style={{ color: 'var(--gold)', fontWeight: 700 }}>
-            {drawing ? 'Draw from stock or take the discard' : 'Meld, lay off, then discard one card'}
-          </p>
+          <Prompt>{drawing ? 'Draw from stock or take the discard' : 'Meld, lay off, then discard one card'}</Prompt>
         ) : (
-          <p className="dim center">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</p>
+          <Waiting state={state} />
         )}
-        {view.lastEvent && <p className="dim small center">{view.lastEvent}</p>}
+        <EventLine text={view.lastEvent} />
       </div>
 
       <div className="card">

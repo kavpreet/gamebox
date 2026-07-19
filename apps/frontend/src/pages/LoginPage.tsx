@@ -51,9 +51,10 @@ export function LoginPage() {
   return (
     <div className="page" style={{ justifyContent: 'center' }}>
       <div className="card">
-        <h1 className="center">
-          Game<span style={{ color: 'var(--accent)' }}>Box</span>
+        <h1 className="center wordmark" style={{ fontSize: '2.6rem' }}>
+          GameBox
         </h1>
+        <p className="center dim" style={{ marginTop: '-0.8rem' }}>the living-room game night machine</p>
         {authConfig?.google && (
           <button onClick={googleSignIn}>Continue with Google</button>
         )}

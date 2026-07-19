@@ -2,10 +2,10 @@ import React from 'react';
 import type { LudoPublic, LudoMove } from '@gamebox/game-ludo';
 import { HOME, SAFE_GLOBALS, globalSquare } from '@gamebox/game-ludo';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, SeatTokens, WinnerBanner } from './common.js';
+import { SEAT_HEX, SeatTokens, WinnerBanner, Prompt, Waiting, Die, EventLine } from './common.js';
 
 const C = 40; // cell size
-const SEAT_COLORS = ['#e94560', '#2ec4b6', '#f5a623', '#7c5cff'];
+const SEAT_COLORS = SEAT_HEX;
 
 /** The 52 main-track cells of the classic 15×15 board, in travel order. */
 const TRACK: [number, number][] = [
@@ -161,19 +161,22 @@ function Board({
       {tokenSpots(view).map((s) => {
         const clickable = yourSeat === s.seat && movable?.includes(s.token) && onMoveToken;
         return (
-          <circle
-            key={`${s.seat}-${s.token}`}
-            cx={s.x}
-            cy={s.y}
-            r={C * 0.36}
-            fill={SEAT_COLORS[s.seat % 4]}
-            stroke={clickable ? '#ffffff' : '#0f1220'}
-            strokeWidth={clickable ? 3.5 : 2}
+          <g key={`${s.seat}-${s.token}`}
             style={clickable ? { cursor: 'pointer' } : undefined}
-            onClick={clickable ? () => onMoveToken(s.token) : undefined}
-          >
-            {clickable && <animate attributeName="r" values={`${C * 0.34};${C * 0.42};${C * 0.34}`} dur="0.9s" repeatCount="indefinite" />}
-          </circle>
+            onClick={clickable ? () => onMoveToken(s.token) : undefined}>
+            <circle cx={s.x} cy={s.y + 2} r={C * 0.36} fill="rgba(0,0,0,0.45)" />
+            <circle
+              cx={s.x}
+              cy={s.y}
+              r={C * 0.36}
+              fill={SEAT_COLORS[s.seat % 4]}
+              stroke={clickable ? '#ffffff' : 'rgba(0,0,0,0.55)'}
+              strokeWidth={clickable ? 3.5 : 2}
+            >
+              {clickable && <animate attributeName="r" values={`${C * 0.34};${C * 0.42};${C * 0.34}`} dur="0.9s" repeatCount="indefinite" />}
+            </circle>
+            <circle cx={s.x - 4} cy={s.y - 4} r={C * 0.1} fill="rgba(255,255,255,0.45)" />
+          </g>
         );
       })}
     </svg>
@@ -220,16 +223,16 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<LudoPublic,
             </button>
           ) : (
             <>
-              <h3>You rolled a {view.die}</h3>
-              <p className="dim">Tap a glowing token to move it</p>
+              <div className="action-bar">{view.die !== null && <Die value={view.die} />}</div>
+              <Prompt>Tap a glowing token to move it</Prompt>
             </>
           )
         ) : (
-          <h3 className="dim">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</h3>
+          <Waiting state={state} />
         )}
-        {view.lastEvent && <p className="dim small">{view.lastEvent}</p>}
+        <EventLine text={view.lastEvent} />
       </div>
-      <div className="card">
+      <div className="board-frame">
         <Board
           view={view}
           yourSeat={yourSeat}
