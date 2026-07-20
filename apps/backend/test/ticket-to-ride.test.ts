@@ -214,6 +214,38 @@ describe('ticket to ride gameplay', () => {
     expect(pub(rt).ticketCounts[seat]).toBe(3); // 2 initial + 1 kept
   });
 
+  it('rejected tickets go to the BOTTOM of the ticket pile, not back on top', () => {
+    const rt = newGame(17, 2);
+    throughInitialTickets(rt);
+    const state = rawState(rt);
+    const hidden = (state.private as any)[-1];
+    const seat = rt.activeSeats()[0]!;
+    rt.applyMove(seat, 'DRAW_TICKETS', {});
+    const offer = (rt.view(seat) as any).offer as { a: string; b: string; points: number }[];
+    const rejected = [offer[1], offer[2]];
+    rt.applyMove(seat, 'CHOOSE_TICKETS', { keep: [0] });
+    // the two rejected tickets must now be the LAST two of the deck (draws splice from the front)
+    expect(hidden.ticketDeck.slice(-2)).toEqual(rejected);
+    // an immediate re-draw by the next player must NOT see the rejected tickets again
+    const seat2 = rt.activeSeats()[0]!;
+    rt.applyMove(seat2, 'DRAW_TICKETS', {});
+    const offer2 = (rt.view(seat2) as any).offer as typeof offer;
+    for (const t of rejected) expect(offer2).not.toContainEqual(t);
+  });
+
+  it('keeps a running action log attributing moves to seats', () => {
+    const rt = newGame(19, 2);
+    throughInitialTickets(rt);
+    const seat = rt.activeSeats()[0]!;
+    rt.applyMove(seat, 'DRAW_BLIND', {});
+    const log = pub(rt).log;
+    expect(log.length).toBeGreaterThanOrEqual(3); // 2× kept tickets + the draw
+    const last = log[log.length - 1]!;
+    expect(last.seat).toBe(seat);
+    expect(last.text).toMatch(/drew a card/);
+    expect(log.some((e) => e.text.match(/kept 2 destination tickets/))).toBe(true);
+  });
+
   it('legal moves cover claims, draws and tickets on a fresh turn', () => {
     const rt = newGame(21, 2);
     throughInitialTickets(rt);

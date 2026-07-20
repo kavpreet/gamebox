@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import type { TtrPublic, TtrMove, Card, TicketView, TrainColor } from '@gamebox/game-ticket-to-ride';
 import { CITY_POS, ROUTES, ROUTE_BY_ID } from '@gamebox/game-ticket-to-ride';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, SEAT_HEX, WinnerBanner, Prompt, Waiting, EventLine } from './common.js';
+import { seatName, SEAT_HEX, WinnerBanner, Prompt, Waiting } from './common.js';
 
 type TtrView = TtrPublic & {
   hand?: Card[];
@@ -94,7 +94,8 @@ function TtrMap({ view, claimable, onRoute }: {
         <g key={c}>
           <circle cx={x * S} cy={y * S} r={7.5} fill="#f2e6c8" stroke="#0a0e24" strokeWidth={2.5} />
           <circle cx={x * S - 2} cy={y * S - 2} r={2.2} fill="rgba(255,255,255,0.7)" />
-          <text x={x * S} y={y * S - 12} textAnchor="middle" fontSize={11.5} fontWeight={700} fill="#9aa3cc">
+          <text x={x * S} y={y * S - 12} textAnchor="middle" fontSize={14.5} fontWeight={800}
+            fill="#e7ebff" stroke="#0a0e24" strokeWidth={3.5} style={{ paintOrder: 'stroke' }}>
             {NICE(c)}
           </text>
         </g>
@@ -153,6 +154,37 @@ function Market({ view, onFaceUp, onBlind, canAct }: {
   );
 }
 
+function LogPanel({ view, summary, limit, fontSize }: {
+  view: TtrView;
+  summary: TvViewProps<TtrView>['state']['summary'];
+  limit: number;
+  fontSize?: string | number;
+}) {
+  const entries = view.log.slice(-limit);
+  if (entries.length === 0) return null;
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: '0.35em', justifyContent: 'flex-end',
+      overflow: 'hidden', minHeight: 0, fontSize,
+    }}>
+      {entries.map((e, i) => (
+        <div key={`${view.log.length - entries.length + i}`}
+          style={{ opacity: 0.45 + (0.55 * (i + 1)) / entries.length }}
+          className={i === entries.length - 1 ? 'pop-in' : undefined}>
+          {e.seat !== null && (
+            <strong style={{ color: SEAT_HEX[e.seat % 6] }}>
+              <span className={`token seat-color-${e.seat % 6}`}
+                style={{ display: 'inline-block', width: '0.6em', height: '0.6em', borderRadius: '50%', marginRight: '0.4em' }} />
+              {seatName(summary, e.seat)}{' '}
+            </strong>
+          )}
+          <span className={e.seat === null ? '' : 'dim'}>{e.text}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Sidebar({ state, view }: { state: TvViewProps<TtrView>['state']; view: TtrView }) {
   return (
     <>
@@ -162,9 +194,13 @@ function Sidebar({ state, view }: { state: TvViewProps<TtrView>['state']; view: 
           <span className={`token seat-color-${s % 6}`} />
           <span className="grow">
             {seatName(state.summary, s)}
-            <div className="dim small">🚂 {view.trainsLeft[s]} · 🂠 {view.handCounts[s]} · 🎫 {view.ticketCounts[s]}</div>
+            <div style={{ fontSize: '1.8vmin', fontWeight: 700, whiteSpace: 'nowrap' }}>
+              🚂 <span key={view.trainsLeft[s]} className="count-bump">{view.trainsLeft[s]}</span>
+              {' '}· 🂠 <span key={`h${view.handCounts[s]}`} className="count-bump">{view.handCounts[s]}</span>
+              {' '}· 🎫 <span key={`t${view.ticketCounts[s]}`} className="count-bump">{view.ticketCounts[s]}</span>
+            </div>
           </span>
-          <strong>{view.finalScores ? view.finalScores[s]!.total : view.routeScores[s] ?? 0}</strong>
+          <strong style={{ fontSize: '2.6vmin' }}>{view.finalScores ? view.finalScores[s]!.total : view.routeScores[s] ?? 0}</strong>
         </div>
       ))}
       {view.endTriggeredBy !== null && view.phase !== 'DONE' && (
@@ -200,7 +236,9 @@ function TvView({ state }: TvViewProps<TtrView>) {
         </div>
         <div className="tv-sidebar">
           <Sidebar state={state} view={view} />
-          {view.lastEvent && <div className="tv-player-chip dim small">{view.lastEvent}</div>}
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+            <LogPanel view={view} summary={state.summary} limit={10} fontSize="1.8vmin" />
+          </div>
         </div>
       </div>
     </div>
@@ -320,7 +358,7 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<TtrView, Tt
             )}
           </>
         )}
-        <EventLine text={view.lastEvent} />
+        <LogPanel view={view} summary={state.summary} limit={3} fontSize="0.85rem" />
       </div>
 
       <div className="board-frame">

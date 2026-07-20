@@ -45,6 +45,8 @@ export interface TtrPublic {
   turnsRemaining: number | null;
   removed: Seat[];
   lastEvent: string | null;
+  /** rolling action log, newest last — { seat, text }, seat null for neutral events */
+  log: { seat: Seat | null; text: string }[];
   finalScores: Record<Seat, {
     route: number; tickets: number; longestPath: number; total: number; completedTickets: number;
   }> | null;
@@ -121,6 +123,16 @@ function refillFaceUp(pub: TtrPublic, hidden: Hidden, rngShuffle: <T>(x: T[]) =>
 function aliveSeats(pub: TtrPublic): Seat[] {
   return pub.order.filter((s) => !pub.removed.includes(s));
 }
+
+const LOG_LIMIT = 20;
+
+function logEvent(pub: TtrPublic, seat: Seat | null, text: string): void {
+  pub.log.push({ seat, text });
+  if (pub.log.length > LOG_LIMIT) pub.log.splice(0, pub.log.length - LOG_LIMIT);
+}
+
+const NICE_CITY = (c: string) =>
+  c.split('-').map((w) => (w === 'st' ? 'St' : w[0]!.toUpperCase() + w.slice(1))).join(' ');
 
 /** Cards of `color` in hand plus locomotives cover `length`? */
 export function canAfford(hand: Card[], color: TrainColor, length: number): boolean {
@@ -201,6 +213,7 @@ export function longestPathLength(pub: TtrPublic, seat: Seat): number {
 function finalize(state: State): void {
   const pub = state.public;
   pub.phase = 'DONE';
+  logEvent(pub, null, 'All aboard terminated — final scoring! 🏆');
   const paths = new Map<Seat, number>();
   for (const s of pub.order) paths.set(s, longestPathLength(pub, s));
   const maxPath = Math.max(...aliveSeats(pub).map((s) => paths.get(s) ?? 0), 0);
@@ -233,6 +246,7 @@ function endTurn(state: State): void {
     pub.endTriggeredBy = seat;
     pub.turnsRemaining = aliveSeats(pub).length; // everyone gets one last turn
     pub.lastEvent = 'Final round — everyone gets one more turn!';
+    logEvent(pub, seat, `is almost out of trains — final round, one turn each! 🏁`);
   }
   if (pub.turnsRemaining !== null && pub.turnsRemaining <= 0) {
     finalize(state);
@@ -251,7 +265,8 @@ function resolveOffer(state: State, seat: Seat, keep: number[]): void {
   const kept = keep.map((i) => offer[i]!);
   const returned = offer.filter((_, i) => !keep.includes(i));
   priv.tickets.push(...kept);
-  hidden.ticketDeck.unshift(...returned); // bottom of the deck
+  // draws come off the FRONT of ticketDeck, so the back is the bottom of the pile
+  hidden.ticketDeck.push(...returned);
   priv.offer = null;
   pub.choosing = pub.choosing.filter((s) => s !== seat);
   pub.ticketCounts[seat] = priv.tickets.length;
@@ -261,7 +276,7 @@ function resolveOffer(state: State, seat: Seat, keep: number[]): void {
 export const ticketToRide: GameModule<TtrPublic, TtrPrivate | Hidden, TtrMove> = {
   slug: 'ticket-to-ride',
   displayName: 'Ticket to Ride',
-  rulesVersion: '1.0.0',
+  rulesVersion: '1.1.0',
   minPlayers: 2,
   maxPlayers: 5,
   teams: 'none',
@@ -297,6 +312,7 @@ export const ticketToRide: GameModule<TtrPublic, TtrPrivate | Hidden, TtrMove> =
       turnsRemaining: null,
       removed: [],
       lastEvent: null,
+      log: [],
       finalScores: null,
       longestPathOwners: [],
     };
@@ -340,6 +356,7 @@ export const ticketToRide: GameModule<TtrPublic, TtrPrivate | Hidden, TtrMove> =
       }
       if (keep.length < minKeep) throw new IllegalMove(`Keep at least ${minKeep} ticket${minKeep > 1 ? 's' : ''}`);
       resolveOffer(s, seat, keep);
+      logEvent(pub, seat, `kept ${keep.length} destination ticket${keep.length === 1 ? '' : 's'} 🎫`);
       if (pub.phase === 'INITIAL_TICKETS') {
         if (pub.choosing.filter((x) => !pub.removed.includes(x)).length === 0) {
           pub.phase = 'PLAY';
@@ -364,6 +381,7 @@ export const ticketToRide: GameModule<TtrPublic, TtrPrivate | Hidden, TtrMove> =
       pub.deckSize = hidden.trainDeck.length;
       pub.discardSize = hidden.trainDiscard.length;
       pub.drawnThisTurn += 1;
+      logEvent(pub, seat, 'drew a card from the deck');
       if (pub.drawnThisTurn >= 2) endTurn(s);
     },
 
@@ -383,6 +401,7 @@ export const ticketToRide: GameModule<TtrPublic, TtrPrivate | Hidden, TtrMove> =
       priv.hand.push(card);
       pub.handCounts[seat] = priv.hand.length;
       refillFaceUp(pub, hiddenOf(s), (x) => rng.shuffle(x));
+      logEvent(pub, seat, card === 'loco' ? 'took the locomotive 🌈' : `took a ${card} card`);
       if (card === 'loco') {
         endTurn(s);
       } else {
@@ -414,6 +433,7 @@ export const ticketToRide: GameModule<TtrPublic, TtrPrivate | Hidden, TtrMove> =
       pub.trainsLeft[seat] = (pub.trainsLeft[seat] ?? 0) - def.length;
       pub.routeScores[seat] = (pub.routeScores[seat] ?? 0) + (ROUTE_POINTS[def.length] ?? 0);
       pub.lastEvent = `${def.a} — ${def.b} claimed (+${ROUTE_POINTS[def.length]})`;
+      logEvent(pub, seat, `built ${NICE_CITY(def.a)} — ${NICE_CITY(def.b)} (+${ROUTE_POINTS[def.length]}) 🚂`);
       endTurn(s);
     },
 
@@ -429,6 +449,7 @@ export const ticketToRide: GameModule<TtrPublic, TtrPrivate | Hidden, TtrMove> =
       priv.offer = hidden.ticketDeck.splice(0, 3);
       pub.choosing.push(seat);
       pub.ticketDeckSize = hidden.ticketDeck.length;
+      logEvent(pub, seat, 'is drawing destination tickets…');
       // turn ends when CHOOSE_TICKETS resolves
     },
   },
@@ -509,8 +530,8 @@ export const ticketToRide: GameModule<TtrPublic, TtrPrivate | Hidden, TtrMove> =
     if (!pub.removed.includes(seat)) pub.removed.push(seat);
     const priv = privOf(state, seat);
     if (priv.offer) {
-      // return their offer to the deck; they keep nothing
-      hiddenOf(state).ticketDeck.unshift(...priv.offer);
+      // return their offer to the bottom of the deck; they keep nothing
+      hiddenOf(state).ticketDeck.push(...priv.offer);
       priv.offer = null;
       pub.choosing = pub.choosing.filter((s) => s !== seat);
       pub.ticketDeckSize = hiddenOf(state).ticketDeck.length;
