@@ -90,6 +90,7 @@ export function buildHttpApp(
       listGames().map((m) => ({
         slug: m.slug,
         displayName: m.displayName,
+        description: m.description ?? '',
         minPlayers: m.minPlayers,
         maxPlayers: m.maxPlayers,
         teams: m.teams ?? 'none',
@@ -136,6 +137,18 @@ export function buildHttpApp(
   app.post('/api/games/:id/teams', requireUser, async (req, res, next) => {
     try {
       const summary = await games.setTeams(String(req.params.id), req.userId!, req.body.teams ?? {});
+      await onGameChanged(summary.id);
+      res.json(summary);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/games/:id/appearance', requireUser, async (req, res, next) => {
+    try {
+      const color = req.body.color === undefined ? null : req.body.color === null ? null : String(req.body.color);
+      const icon = req.body.icon === undefined ? null : req.body.icon === null ? null : String(req.body.icon);
+      const summary = await games.setAppearance(String(req.params.id), req.userId!, color, icon);
       await onGameChanged(summary.id);
       res.json(summary);
     } catch (err) {

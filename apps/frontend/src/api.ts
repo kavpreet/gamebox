@@ -17,6 +17,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 export interface GameTypeInfo {
   slug: string;
   displayName: string;
+  description: string;
   minPlayers: number;
   maxPlayers: number;
   teams: 'none' | 'optional' | 'required';
@@ -36,6 +37,8 @@ export const api = {
   game: (id: string) => req<GameSummary>('GET', `/api/games/${id}`),
   setTeams: (id: string, teams: Record<number, number | null>) =>
     req<GameSummary>('POST', `/api/games/${id}/teams`, { teams }),
+  setAppearance: (id: string, color: string | null, icon: string | null) =>
+    req<GameSummary>('POST', `/api/games/${id}/appearance`, { color, icon }),
   startGame: (id: string) => req<GameSummary>('POST', `/api/games/${id}/start`),
   abandonGame: (id: string) => req<{ ok: boolean }>('POST', `/api/games/${id}/abandon`),
   rooms: () => req<RoomDTO[]>('GET', '/api/rooms'),

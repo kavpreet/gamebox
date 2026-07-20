@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { ScattergoriesPublic, ScattergoriesMove } from '@gamebox/game-scattergories';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, WinnerBanner } from './common.js';
+import { seatName, SeatDot, WinnerBanner } from './common.js';
 
 type ScatView = ScattergoriesPublic & { yourAnswers: string[] | null };
 
@@ -10,7 +10,7 @@ function Scoreboard({ view, state }: { view: ScatView; state: { summary: TvViewP
     <>
       {view.order.map((s) => (
         <div key={s} className={`tv-player-chip ${state.activeSeats.includes(s) ? 'active' : ''}`}>
-          <span className={`token seat-color-${s % 6}`} />
+          <SeatDot summary={state.summary} seat={s} />
           <span className="grow">
             {seatName(state.summary, s)}
             {view.phase !== 'DONE' && view.submitted.includes(s) && <span className="dim small"> ✓</span>}

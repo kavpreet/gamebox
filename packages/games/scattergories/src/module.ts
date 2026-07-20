@@ -155,6 +155,7 @@ function markSubmitted(s: State, seat: Seat): void {
 export const scattergories: GameModule<ScattergoriesPublic, SeatPrivate | Hidden, ScattergoriesMove> = {
   slug: 'scattergories',
   displayName: 'Scattergories',
+  description: 'One letter, wild categories — unique answers score, duds get vetoed.',
   rulesVersion: '1.0.0',
   minPlayers: 2,
   maxPlayers: 10,

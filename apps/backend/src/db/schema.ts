@@ -40,6 +40,10 @@ export interface GamePlayersTable {
   connected: number; // 0/1 (SQLite has no boolean)
   eliminated_at: string | null;
   last_seen_at: string | null;
+  /** hex color or 'transparent'; null = not customized yet */
+  color: string | null;
+  /** an emoji, or null = no icon */
+  icon: string | null;
 }
 
 export interface MovesTable {

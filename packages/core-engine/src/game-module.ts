@@ -36,6 +36,8 @@ export class IllegalMove extends Error {
 export interface GameModule<TPublic = unknown, TPrivate = unknown, TMove = unknown> {
   slug: string;
   displayName: string;
+  /** One-liner shown on the TV lobby and pickers. */
+  description?: string;
   rulesVersion: string;
   minPlayers: number;
   maxPlayers: number;

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import type { ScrabblePublic, ScrabbleMove, BoardCell } from '@gamebox/game-scrabble';
 import { premiumAt, LETTER_VALUES, BOARD_SIZE, CENTER } from '@gamebox/game-scrabble';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { WinnerBanner, Prompt, Waiting, EventLine } from './common.js';
+import { SeatDot, WinnerBanner, Prompt, Waiting, EventLine } from './common.js';
 
 type ScrabbleView = ScrabblePublic & { rack: string[] | null };
 
@@ -132,7 +132,7 @@ function TvView({ state }: TvViewProps<ScrabbleView>) {
       <div className="tv-sidebar">
         {state.summary.players.filter((p) => view.order.includes(p.seat)).map((p) => (
           <div key={p.seat} className={`tv-player-chip ${state.activeSeats.includes(p.seat) ? 'active' : ''}`}>
-            <span className={`token seat-color-${p.seat % 6}`} />
+            <SeatDot summary={state.summary} seat={p.seat} />
             <span className="grow">{p.displayName} <span className="dim small">({view.rackCounts[p.seat] ?? 0} tiles)</span></span>
             <strong>{view.scores[p.seat] ?? 0}</strong>
           </div>

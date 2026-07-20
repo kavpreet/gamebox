@@ -334,6 +334,7 @@ function playDev(s: State, seat: Seat, card: DevCard): void {
 export const catan: GameModule<CatanPublic, CatanPrivate | Hidden, CatanMove> = {
   slug: 'catan',
   displayName: 'Catan',
+  description: 'Settle the island: roll, gather, trade, and build to 10 points.',
   rulesVersion: '1.0.0',
   minPlayers: 3,
   maxPlayers: 4,

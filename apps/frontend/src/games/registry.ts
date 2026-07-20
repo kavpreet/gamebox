@@ -15,7 +15,7 @@ import { azulUi } from './azul-ui.js';
 import { scattergoriesUi } from './scattergories-ui.js';
 import { scrabbleUi } from './scrabble-ui.js';
 import { pictionaryUi } from './pictionary-ui.js';
-import { ticketToRideUi } from './ticket-to-ride-ui.js';
+import { ticketToRideUi, ticketToRideEuropeUi } from './ticket-to-ride-ui.js';
 
 const uis: GameUi[] = [
   snakesAndLaddersUi,
@@ -36,6 +36,7 @@ const uis: GameUi[] = [
   scrabbleUi,
   pictionaryUi,
   ticketToRideUi,
+  ticketToRideEuropeUi,
 ];
 
 const bySlug = new Map(uis.map((u) => [u.slug, u]));

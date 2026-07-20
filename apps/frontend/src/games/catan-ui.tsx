@@ -4,7 +4,8 @@ import {
   cornersOf, hexCenter, vertexXY, edgeVertices, hexKey, RESOURCES,
 } from '@gamebox/game-catan';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, SEAT_HEX, WinnerBanner, Prompt, Waiting, EventLine } from './common.js';
+import type { GameSummary } from '@gamebox/shared-types';
+import { seatName, seatColor, SeatDot, WinnerBanner, Prompt, Waiting, EventLine, useSlideAnim, useBoardFit } from './common.js';
 
 type CatanView = CatanPublic & {
   yourResources: Record<Resource, number> | null;
@@ -12,7 +13,6 @@ type CatanView = CatanPublic & {
   yourNewDevCards: DevCard[] | null;
 };
 
-const SEAT_COLORS = SEAT_HEX;
 const TILE_HEX: Record<string, string> = {
   wood: '#2e7d46', brick: '#b3552e', sheep: '#8fce5a', wheat: '#e5c355', ore: '#8b90a8', desert: '#d8c48f',
 };
@@ -49,6 +49,7 @@ function orderedHexPolygon(q: number, r: number): string {
 
 function Board({
   view,
+  summary,
   clickVertices,
   clickEdges,
   clickHexes,
@@ -57,6 +58,7 @@ function Board({
   onHex,
 }: {
   view: CatanView;
+  summary: GameSummary;
   clickVertices?: Set<string>;
   clickEdges?: Set<string>;
   clickHexes?: Set<string>;
@@ -71,8 +73,28 @@ function Board({
     return [...set];
   }, [view.roads, clickEdges]);
 
+  // robber: no from/to on the wire, so remember the previous hex ourselves
+  // and glide across the board instead of teleporting.
+  const prevRobberRef = React.useRef<string | null>(null);
+  const prevRobber = prevRobberRef.current;
+  React.useEffect(() => {
+    prevRobberRef.current = view.robber;
+  }, [view.robber]);
+  const centerOfHex = (key: string): { x: number; y: number } | null => {
+    const h = view.hexes.find((hh) => hexKey(hh.q, hh.r) === key);
+    return h ? px(hexCenter(h.q, h.r)) : null;
+  };
+  const robberMoveKey = prevRobber && prevRobber !== view.robber ? `${prevRobber}->${view.robber}` : null;
+  const robberSlide = useSlideAnim(
+    robberMoveKey,
+    prevRobber ? centerOfHex(prevRobber) : null,
+    centerOfHex(view.robber),
+  );
+
+  const fit = useBoardFit();
   return (
-    <svg viewBox="0 0 680 600" style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
+    <svg viewBox="0 0 680 600" preserveAspectRatio={fit}
+      style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}>
       <defs>
         <radialGradient id="catan-sea" cx="50%" cy="45%" r="75%">
           <stop offset="0%" stopColor="#123056" />
@@ -112,7 +134,7 @@ function Board({
                 </g>
               </>
             )}
-            {view.robber === key && (
+            {view.robber === key && !robberSlide && (
               <g>
                 <ellipse cx={c.x} cy={c.y + 40} rx={13} ry={6} fill="rgba(0,0,0,0.45)" />
                 <text x={c.x} y={c.y + 42} textAnchor="middle" fontSize={24}>🦹</text>
@@ -121,6 +143,12 @@ function Board({
           </g>
         );
       })}
+      {robberSlide && (
+        <g style={{ pointerEvents: 'none' }}>
+          <ellipse cx={robberSlide.x} cy={robberSlide.y + 40} rx={13} ry={6} fill="rgba(0,0,0,0.45)" />
+          <text x={robberSlide.x} y={robberSlide.y + 42} textAnchor="middle" fontSize={24}>🦹</text>
+        </g>
+      )}
       {/* roads + buildable edges */}
       {allEdges.map((e) => {
         const [a, b] = edgeVertices(e);
@@ -131,7 +159,7 @@ function Board({
         if (owner === undefined && !clickable) return null;
         return (
           <line key={e} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
-            stroke={owner !== undefined ? SEAT_COLORS[owner % 4] : 'rgba(46,196,182,0.55)'}
+            stroke={owner !== undefined ? seatColor(summary, owner) : 'rgba(46,196,182,0.55)'}
             strokeWidth={owner !== undefined ? 7 : 9}
             strokeLinecap="round"
             strokeDasharray={clickable ? '4 6' : undefined}
@@ -142,16 +170,17 @@ function Board({
       {/* buildings + buildable vertices */}
       {Object.entries(view.buildings).map(([v, b]) => {
         const p = px(vertexXY(v));
+        const bc = seatColor(summary, b.owner);
         return b.city ? (
           <g key={v}>
             <rect x={p.x - 10} y={p.y - 8} width={20} height={17} rx={3}
-              fill={SEAT_COLORS[b.owner % 4]} stroke="#ffffff" strokeWidth={2} />
+              fill={bc} stroke="#ffffff" strokeWidth={2} />
             <path d={`M ${p.x - 11} ${p.y - 8} L ${p.x} ${p.y - 17} L ${p.x + 11} ${p.y - 8} Z`}
-              fill={SEAT_COLORS[b.owner % 4]} stroke="#ffffff" strokeWidth={2} />
+              fill={bc} stroke="#ffffff" strokeWidth={2} />
           </g>
         ) : (
           <circle key={v} cx={p.x} cy={p.y} r={9}
-            fill={SEAT_COLORS[b.owner % 4]} stroke="#ffffff" strokeWidth={2} />
+            fill={bc} stroke="#ffffff" strokeWidth={2} />
         );
       })}
       {clickVertices && [...clickVertices].map((v) => {
@@ -167,12 +196,12 @@ function Board({
   );
 }
 
-function Sidebar({ state, view }: { state: { summary: any; activeSeats: number[] }; view: CatanView }) {
+function Sidebar({ state, view }: { state: { summary: GameSummary; activeSeats: number[] }; view: CatanView }) {
   return (
     <>
       {view.order.map((s) => (
         <div key={s} className={`tv-player-chip ${state.activeSeats.includes(s) ? 'active' : ''}`}>
-          <span className="token" style={{ background: SEAT_COLORS[s % 4] }} />
+          <SeatDot summary={state.summary} seat={s} />
           <span className="grow">
             {seatName(state.summary, s)}
             <div className="dim small">
@@ -194,7 +223,7 @@ function TvView({ state }: TvViewProps<CatanView>) {
   return (
     <div className="tv-main">
       <div className="tv-board">
-        <Board view={view} />
+        <Board view={view} summary={state.summary} />
       </div>
       <div className="tv-sidebar">
         <Sidebar state={state} view={view} />
@@ -368,6 +397,7 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<CatanView, 
       <div className="board-frame">
         <Board
           view={view}
+          summary={state.summary}
           clickVertices={clickVertices}
           clickEdges={clickEdges}
           clickHexes={clickHexes}

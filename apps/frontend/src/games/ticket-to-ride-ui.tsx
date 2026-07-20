@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import type { TtrPublic, TtrMove, Card, TicketView, TrainColor } from '@gamebox/game-ticket-to-ride';
-import { CITY_POS, ROUTES, ROUTE_BY_ID } from '@gamebox/game-ticket-to-ride';
+import type { GameSummary } from '@gamebox/shared-types';
+import type { TtrPublic, TtrMove, Card, TicketView, TrainColor, TtrMapDef } from '@gamebox/game-ticket-to-ride';
+import { MAPS } from '@gamebox/game-ticket-to-ride';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, SEAT_HEX, WinnerBanner, Prompt, Waiting } from './common.js';
+import { seatName, seatColor, SeatDot, WinnerBanner, Prompt, Waiting, useBoardFit } from './common.js';
 
 type TtrView = TtrPublic & {
   hand?: Card[];
@@ -21,16 +22,22 @@ const NICE = (c: string) => c.split('-').map((w) => (w === 'st' ? 'St' : w[0]!.t
 
 const S = 10;
 
+function mapDefOf(view: TtrView): TtrMapDef {
+  return MAPS[view.map] ?? MAPS['north-america']!;
+}
+
 /** Route drawn as `length` little train-car segments along the city-to-city line. */
-function RouteSegments({ id, owner, highlight, onClick }: {
+function RouteSegments({ mapDef, summary, id, owner, highlight, onClick }: {
+  mapDef: TtrMapDef;
+  summary: GameSummary;
   id: string;
   owner: number | undefined;
   highlight?: boolean;
   onClick?: () => void;
 }) {
-  const def = ROUTE_BY_ID[id]!;
-  const [ax, ay] = CITY_POS[def.a]!;
-  const [bx, by] = CITY_POS[def.b]!;
+  const def = mapDef.routeById[id]!;
+  const [ax, ay] = mapDef.cityPos[def.a]!;
+  const [bx, by] = mapDef.cityPos[def.b]!;
   const x1 = ax * S, y1 = ay * S, x2 = bx * S, y2 = by * S;
   const dx = x2 - x1, dy = y2 - y1;
   const dist = Math.hypot(dx, dy);
@@ -39,7 +46,7 @@ function RouteSegments({ id, owner, highlight, onClick }: {
   const usable = dist - margin * 2;
   const gap = 3;
   const segLen = (usable - gap * (def.length - 1)) / def.length;
-  const color = owner !== undefined ? SEAT_HEX[owner % 6] : ROUTE_HEX[def.color];
+  const color = owner !== undefined ? seatColor(summary, owner) : ROUTE_HEX[def.color];
   const segs = Array.from({ length: def.length }, (_, i) => {
     const t = (margin + i * (segLen + gap) + segLen / 2) / dist;
     return [x1 + dx * t, y1 + dy * t] as const;
@@ -67,13 +74,17 @@ function RouteSegments({ id, owner, highlight, onClick }: {
   );
 }
 
-function TtrMap({ view, claimable, onRoute }: {
+function TtrMap({ view, summary, claimable, onRoute }: {
   view: TtrView;
+  summary: GameSummary;
   claimable?: Set<string>;
   onRoute?: (id: string) => void;
 }) {
+  const mapDef = mapDefOf(view);
+  const fit = useBoardFit();
   return (
-    <svg viewBox="0 0 1000 620" style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
+    <svg viewBox="0 0 1000 620" preserveAspectRatio={fit}
+      style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}>
       <defs>
         <radialGradient id="ttr-bg" cx="50%" cy="42%" r="80%">
           <stop offset="0%" stopColor="#14203e" />
@@ -81,16 +92,18 @@ function TtrMap({ view, claimable, onRoute }: {
         </radialGradient>
       </defs>
       <rect width={1000} height={620} rx={16} fill="url(#ttr-bg)" />
-      {ROUTES.map((r) => (
+      {mapDef.routes.map((r) => (
         <RouteSegments
           key={r.id}
+          mapDef={mapDef}
+          summary={summary}
           id={r.id}
           owner={view.claimed[r.id]}
           highlight={claimable?.has(r.id)}
           onClick={onRoute && claimable?.has(r.id) ? () => onRoute(r.id) : undefined}
         />
       ))}
-      {Object.entries(CITY_POS).map(([c, [x, y]]) => (
+      {Object.entries(mapDef.cityPos).map(([c, [x, y]]) => (
         <g key={c}>
           <circle cx={x * S} cy={y * S} r={7.5} fill="#f2e6c8" stroke="#0a0e24" strokeWidth={2.5} />
           <circle cx={x * S - 2} cy={y * S - 2} r={2.2} fill="rgba(255,255,255,0.7)" />
@@ -172,9 +185,8 @@ function LogPanel({ view, summary, limit, fontSize }: {
           style={{ opacity: 0.45 + (0.55 * (i + 1)) / entries.length }}
           className={i === entries.length - 1 ? 'pop-in' : undefined}>
           {e.seat !== null && (
-            <strong style={{ color: SEAT_HEX[e.seat % 6] }}>
-              <span className={`token seat-color-${e.seat % 6}`}
-                style={{ display: 'inline-block', width: '0.6em', height: '0.6em', borderRadius: '50%', marginRight: '0.4em' }} />
+            <strong style={{ color: seatColor(summary, e.seat) }}>
+              <SeatDot summary={summary} seat={e.seat} size={14} />{' '}
               {seatName(summary, e.seat)}{' '}
             </strong>
           )}
@@ -191,7 +203,7 @@ function Sidebar({ state, view }: { state: TvViewProps<TtrView>['state']; view: 
       {view.order.map((s) => (
         <div key={s} className={`tv-player-chip ${state.activeSeats.includes(s) ? 'active' : ''}`}
           style={view.removed.includes(s) ? { opacity: 0.4 } : undefined}>
-          <span className={`token seat-color-${s % 6}`} />
+          <SeatDot summary={state.summary} seat={s} />
           <span className="grow">
             {seatName(state.summary, s)}
             <div style={{ fontSize: '1.8vmin', fontWeight: 700, whiteSpace: 'nowrap' }}>
@@ -232,7 +244,7 @@ function TvView({ state }: TvViewProps<TtrView>) {
       <Market view={view} canAct={false} />
       <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: '2vmin' }}>
         <div className="tv-board">
-          <TtrMap view={view} />
+          <TtrMap view={view} summary={state.summary} />
         </div>
         <div className="tv-sidebar">
           <Sidebar state={state} view={view} />
@@ -362,7 +374,7 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<TtrView, Tt
       </div>
 
       <div className="board-frame">
-        <TtrMap view={view} claimable={actionable ? claimable : undefined} onRoute={onRoute} />
+        <TtrMap view={view} summary={state.summary} claimable={actionable ? claimable : undefined} onRoute={onRoute} />
       </div>
 
       <div className="card">
@@ -409,3 +421,4 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<TtrView, Tt
 }
 
 export const ticketToRideUi: GameUi = { slug: 'ticket-to-ride', PlayerView, TvView };
+export const ticketToRideEuropeUi: GameUi = { slug: 'ticket-to-ride-europe', PlayerView, TvView };

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { ChessPublic, ChessMove } from '@gamebox/game-chess';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { SeatTokens, WinnerBanner, Prompt, Waiting } from './common.js';
+import { SeatTokens, WinnerBanner, Prompt, Waiting, useSlideAnim, useBoardFit } from './common.js';
 
 const PIECES: Record<string, string> = {
   wk: '♔', wq: '♕', wr: '♖', wb: '♗', wn: '♘', wp: '♙',
@@ -42,6 +42,15 @@ function sq(file: number, rank: number): string {
   return String.fromCharCode(97 + file) + String(rank + 1);
 }
 
+function squareXY(name: string, flipped: boolean | undefined, C: number, M: number): { x: number; y: number } {
+  const file = name.charCodeAt(0) - 97;
+  const rank = Number(name[1]) - 1;
+  return {
+    x: (flipped ? 7 - file : file) * C + M + C / 2,
+    y: (flipped ? rank : 7 - rank) * C + M + C / 2,
+  };
+}
+
 function Board({
   view,
   flipped,
@@ -59,8 +68,17 @@ function Board({
   const C = 60;
   const M = 22; // margin for coordinates
   const W = 8 * C + M * 2;
+
+  const moveKey = view.lastMove ? `${view.lastMove.from}-${view.lastMove.to}-${view.history.length}` : null;
+  const slideFrom = view.lastMove ? squareXY(view.lastMove.from, flipped, C, M) : null;
+  const slideTo = view.lastMove ? squareXY(view.lastMove.to, flipped, C, M) : null;
+  const slidePos = useSlideAnim(moveKey, slideFrom, slideTo);
+  const slidingPiece = slidePos && view.lastMove ? squares.find((s) => s.name === view.lastMove!.to)?.piece : null;
+
+  const fit = useBoardFit();
   return (
-    <svg viewBox={`0 0 ${W} ${W}`} style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
+    <svg viewBox={`0 0 ${W} ${W}`} preserveAspectRatio={fit}
+      style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}>
       <rect width={W} height={W} rx={10} fill="#241a12" />
       {Array.from({ length: 8 }, (_, i) => {
         const fileCh = String.fromCharCode(97 + (flipped ? 7 - i : i));
@@ -87,7 +105,7 @@ function Board({
             {isSel && <rect x={x} y={y} width={C} height={C} fill="rgba(255,185,48,0.65)" />}
             {isTarget && <circle cx={x + C / 2} cy={y + C / 2} r={s.piece ? C * 0.44 : C * 0.15}
               fill={s.piece ? 'none' : 'rgba(38,120,100,0.6)'} stroke={s.piece ? 'rgba(38,120,100,0.8)' : 'none'} strokeWidth={4.5} />}
-            {s.piece && (
+            {s.piece && !(slidePos && view.lastMove?.to === s.name) && (
               <text x={x + C / 2} y={y + C * 0.74} textAnchor="middle" fontSize={C * 0.76}
                 fill={s.piece[0] === 'w' ? '#fdfdf8' : '#1c1512'}
                 stroke={s.piece[0] === 'w' ? '#3a2c20' : '#00000055'} strokeWidth={1}
@@ -98,6 +116,14 @@ function Board({
           </g>
         );
       })}
+      {slidePos && slidingPiece && (
+        <text x={slidePos.x} y={slidePos.y + C * 0.24} textAnchor="middle" fontSize={C * 0.76}
+          fill={slidingPiece[0] === 'w' ? '#fdfdf8' : '#1c1512'}
+          stroke={slidingPiece[0] === 'w' ? '#3a2c20' : '#00000055'} strokeWidth={1}
+          style={{ filter: 'drop-shadow(0 3px 3px rgba(0,0,0,0.5))', pointerEvents: 'none' }}>
+          {PIECES[slidingPiece]}
+        </text>
+      )}
     </svg>
   );
 }

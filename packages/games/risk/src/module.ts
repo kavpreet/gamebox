@@ -101,6 +101,7 @@ function checkElimination(pub: RiskPublic): void {
 export const risk: GameModule<RiskPublic, RiskPrivate, RiskMove> = {
   slug: 'risk',
   displayName: 'Risk',
+  description: 'World domination — reinforce, attack, and conquer all 42 territories.',
   rulesVersion: '1.0.0',
   minPlayers: 2,
   maxPlayers: 6,

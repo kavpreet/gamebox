@@ -2,9 +2,8 @@ import React, { useState } from 'react';
 import type { RiskPublic, RiskMove } from '@gamebox/game-risk';
 import { ADJACENCY } from '@gamebox/game-risk';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, SEAT_HEX, SeatTokens, WinnerBanner, Prompt, Waiting } from './common.js';
-
-const SEAT_COLORS = SEAT_HEX;
+import type { GameSummary } from '@gamebox/shared-types';
+import { seatName, seatColor, SeatTokens, WinnerBanner, Prompt, Waiting, useBoardFit } from './common.js';
 
 /** Abstract world layout: territory → (x, y) in a 100×72 space. */
 const POS: Record<string, [number, number]> = {
@@ -32,11 +31,13 @@ for (const t of Object.keys(POS)) {
 
 function Map({
   view,
+  summary,
   selected,
   highlights,
   onTerritory,
 }: {
   view: RiskPublic;
+  summary: GameSummary;
   selected?: string | null;
   highlights?: Set<string>;
   onTerritory?: (t: string) => void;
@@ -67,8 +68,10 @@ function Map({
     }
   }
 
+  const fit = useBoardFit();
   return (
-    <svg viewBox="0 0 1000 720" style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
+    <svg viewBox="0 0 1000 720" preserveAspectRatio={fit}
+      style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}>
       <defs>
         <radialGradient id="risk-bg" cx="50%" cy="40%" r="80%">
           <stop offset="0%" stopColor="#111a3a" />
@@ -91,7 +94,7 @@ function Map({
             )}
             <circle cx={x * SCALE} cy={y * SCALE + 3} r={22} fill="rgba(0,0,0,0.4)" />
             <circle cx={x * SCALE} cy={y * SCALE} r={22}
-              fill={SEAT_COLORS[terr.owner % 6]}
+              fill={seatColor(summary, terr.owner)}
               stroke={isSel ? '#ffffff' : '#0a0e24'}
               strokeWidth={isSel ? 5 : 2}
               opacity={view.eliminated.includes(terr.owner) ? 0.35 : 1}
@@ -117,7 +120,7 @@ function TvView({ state }: TvViewProps<RiskPublic>) {
   return (
     <div className="tv-main">
       <div className="tv-board">
-        <Map view={view} />
+        <Map view={view} summary={state.summary} />
       </div>
       <div className="tv-sidebar">
         <SeatTokens summary={state.summary} activeSeats={state.activeSeats} />
@@ -248,7 +251,7 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<RiskPublic,
         )}
       </div>
       <div className="board-frame">
-        <Map view={view} selected={selected} highlights={highlights} onTerritory={onTerritory} />
+        <Map view={view} summary={state.summary} selected={selected} highlights={highlights} onTerritory={onTerritory} />
       </div>
     </div>
   );

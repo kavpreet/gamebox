@@ -5,7 +5,14 @@ import type { RoomDTO } from '@gamebox/shared-types';
 import { getSocket, emitAck } from '../socket.js';
 import { getGameUi } from '../games/registry.js';
 import type { LiveState } from '../games/types.js';
-import { SeatTokens, WinnerBanner } from '../games/common.js';
+import { SeatTokens, SeatDot, WinnerBanner, TvFitContext, type TvFit } from '../games/common.js';
+import { api, type GameTypeInfo } from '../api.js';
+
+const FIT_STORAGE_KEY = 'gamebox-tv-fit';
+
+function loadFit(): TvFit {
+  return window.localStorage.getItem(FIT_STORAGE_KEY) === 'stretch' ? 'stretch' : 'fit';
+}
 
 /**
  * The kiosk page (plan §5.7): boots to a stable ROOM url — /tv?room=<code> —
@@ -18,6 +25,17 @@ export function TvPage() {
   const [room, setRoom] = useState<RoomDTO | null>(null);
   const [state, setState] = useState<LiveState | null>(null);
   const [qr, setQr] = useState('');
+  const [types, setTypes] = useState<GameTypeInfo[]>([]);
+  const [fit, setFit] = useState<TvFit>(loadFit);
+
+  const setAndStoreFit = (f: TvFit) => {
+    setFit(f);
+    window.localStorage.setItem(FIT_STORAGE_KEY, f);
+  };
+
+  useEffect(() => {
+    api.gameTypes().then(setTypes).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const socket = getSocket();
@@ -76,9 +94,13 @@ export function TvPage() {
 
   // Lobby on the big screen: PIN + QR
   if (state.status === 'lobby') {
+    const typeInfo = types.find((t) => t.slug === state.summary.gameType);
     return (
       <div className="idle-screen">
-        <h1 className="wordmark" style={{ fontSize: '4.5vmin' }}>Waiting for players…</h1>
+        <h1 className="wordmark" style={{ fontSize: '4.5vmin' }}>{typeInfo?.displayName ?? state.summary.gameType}</h1>
+        {typeInfo?.description && (
+          <p className="dim" style={{ fontSize: '2.2vmin', marginTop: '-1.4rem', maxWidth: '60vmin' }}>{typeInfo.description}</p>
+        )}
         <div className="pin-display" style={{ fontSize: '9vmin' }}>
           {state.summary.joinPin}
         </div>
@@ -87,7 +109,7 @@ export function TvPage() {
         <div style={{ display: 'flex', gap: '2vmin', flexWrap: 'wrap', justifyContent: 'center' }}>
           {state.summary.players.map((p) => (
             <div key={p.seat} className="tv-player-chip">
-              <span className={`token seat-color-${p.seat % 6}`} />
+              <SeatDot summary={state.summary} seat={p.seat} />
               {p.displayName}
             </div>
           ))}
@@ -98,25 +120,47 @@ export function TvPage() {
 
   const ui = getGameUi(state.summary.gameType);
   return (
-    <div className="tv-screen">
-      <div className="tv-header">
-        <span className="logo">
-          <span className="wordmark">GameBox</span>
-          {state.status === 'paused' && <span style={{ color: 'var(--gold)' }}> — PAUSED</span>}
-        </span>
-        {state.summary.joinPin && <span className="dim">join with PIN <strong style={{ color: 'var(--gold)' }}>{state.summary.joinPin}</strong></span>}
-      </div>
-      {ui ? (
-        <ui.TvView state={state} />
-      ) : (
-        <div className="tv-main">
-          <div className="tv-board dim">No TV view registered for {state.summary.gameType}</div>
-          <div className="tv-sidebar">
-            <SeatTokens summary={state.summary} activeSeats={state.activeSeats} />
-            <WinnerBanner state={state} />
-          </div>
+    <TvFitContext.Provider value={fit}>
+      <div className="tv-screen">
+        <div className="tv-header">
+          <span className="logo">
+            <span className="wordmark">GameBox</span>
+            {state.status === 'paused' && <span style={{ color: 'var(--gold)' }}> — PAUSED</span>}
+          </span>
+          <span className="row" style={{ gap: '1.4vmin' }}>
+            {state.summary.joinPin && <span className="dim">join with PIN <strong style={{ color: 'var(--gold)' }}>{state.summary.joinPin}</strong></span>}
+            <span className="row" style={{ gap: 0, fontSize: '1.6vmin' }}>
+              <button
+                className={fit === 'fit' ? 'secondary' : 'ghost'}
+                style={{ padding: '0.3em 0.7em', fontSize: 'inherit', borderRadius: '999px 0 0 999px' }}
+                onClick={() => setAndStoreFit('fit')}
+                title="Keep the board's proportions, letterbox the rest"
+              >
+                Fit
+              </button>
+              <button
+                className={fit === 'stretch' ? 'secondary' : 'ghost'}
+                style={{ padding: '0.3em 0.7em', fontSize: 'inherit', borderRadius: '0 999px 999px 0' }}
+                onClick={() => setAndStoreFit('stretch')}
+                title="Stretch the board to fill the whole area"
+              >
+                Stretch
+              </button>
+            </span>
+          </span>
         </div>
-      )}
-    </div>
+        {ui ? (
+          <ui.TvView state={state} />
+        ) : (
+          <div className="tv-main">
+            <div className="tv-board dim">No TV view registered for {state.summary.gameType}</div>
+            <div className="tv-sidebar">
+              <SeatTokens summary={state.summary} activeSeats={state.activeSeats} />
+              <WinnerBanner state={state} />
+            </div>
+          </div>
+        )}
+      </div>
+    </TvFitContext.Provider>
   );
 }

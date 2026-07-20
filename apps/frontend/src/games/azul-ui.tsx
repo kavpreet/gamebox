@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import type { AzulPublic, AzulMove, PlayerBoard, TileColor } from '@gamebox/game-azul';
 import { wallColor } from '@gamebox/game-azul';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, WinnerBanner, Prompt, Waiting } from './common.js';
+import { seatName, SeatDot, WinnerBanner, Prompt, Waiting } from './common.js';
 
 const TILE_COLORS = ['#4a7cf7', '#f5d547', '#e94560', '#2b2b35', '#3ec8c0'];
 const TILE_NAMES = ['blue', 'yellow', 'red', 'black', 'teal'];
@@ -183,7 +183,7 @@ function TvView({ state }: TvViewProps<AzulPublic>) {
       <div className="tv-sidebar">
         {state.summary.players.filter((p) => view.order.includes(p.seat)).map((p) => (
           <div key={p.seat} className={`tv-player-chip ${state.activeSeats.includes(p.seat) ? 'active' : ''}`}>
-            <span className={`token seat-color-${p.seat % 6}`} />
+            <SeatDot summary={state.summary} seat={p.seat} />
             <span className="grow">{p.displayName}</span>
             <strong>{view.boards[p.seat]?.score ?? 0}</strong>
           </div>

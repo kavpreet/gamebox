@@ -74,6 +74,7 @@ function advanceTurn(pub: LudoPublic, extraTurn: boolean): void {
 export const ludo: GameModule<LudoPublic, LudoPrivate, LudoMove> = {
   slug: 'ludo',
   displayName: 'Ludo',
+  description: 'Race all four tokens home — sixes free you, landings send foes back.',
   rulesVersion: '1.0.0',
   minPlayers: 2,
   maxPlayers: 4,

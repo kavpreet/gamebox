@@ -106,6 +106,7 @@ function finishRound(s: State, reason: string): void {
 export const pictionary: GameModule<PictionaryPublic, Hidden | Record<string, never>, PictionaryMove> = {
   slug: 'pictionary',
   displayName: 'Pictionary',
+  description: 'Draw the secret word on your phone; everyone races to guess.',
   rulesVersion: '1.0.0',
   minPlayers: 3,
   maxPlayers: 10,

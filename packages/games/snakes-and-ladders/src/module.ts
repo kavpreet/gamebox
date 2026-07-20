@@ -41,6 +41,7 @@ function advanceTurn(pub: SnlPublic): void {
 export const snakesAndLadders: GameModule<SnlPublic, SnlPrivate, SnlMove> = {
   slug: 'snakes-and-ladders',
   displayName: 'Snakes & Ladders',
+  description: 'Pure luck: climb the ladders, dodge the snakes, first to 100.',
   rulesVersion: '1.0.0',
   minPlayers: 2,
   maxPlayers: 6,

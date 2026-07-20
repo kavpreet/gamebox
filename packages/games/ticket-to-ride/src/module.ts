@@ -1,9 +1,10 @@
 import type { GameModule, GameState, Seat } from '@gamebox/core-engine';
 import { IllegalMove } from '@gamebox/core-engine';
 import {
-  ROUTES, ROUTE_BY_ID, ROUTE_POINTS, TICKETS, TRAIN_COLORS,
+  ROUTE_POINTS, TRAIN_COLORS,
   type RouteColor, type TicketDef, type TrainColor,
 } from './map.js';
+import { MAPS, type TtrMapDef } from './maps.js';
 
 /**
  * Ticket to Ride — claim train routes across the map, complete secret
@@ -23,6 +24,8 @@ export interface TicketView extends TicketDef {
 }
 
 export interface TtrPublic {
+  /** which TtrMapDef this game is played on (MAPS key) */
+  map: string;
   faceUp: Card[];
   deckSize: number;
   discardSize: number;
@@ -89,6 +92,10 @@ function privOf(state: State, seat: Seat): TtrPrivate {
 
 function currentSeat(pub: TtrPublic): Seat {
   return pub.order[pub.turnIndex % pub.order.length] as Seat;
+}
+
+function mapOf(pub: TtrPublic): TtrMapDef {
+  return MAPS[pub.map] ?? MAPS['north-america']!;
 }
 
 function drawFromDeck(hidden: Hidden, rngShuffle: <T>(x: T[]) => T[]): Card | null {
@@ -166,7 +173,7 @@ function reachable(pub: TtrPublic, seat: Seat, from: string): Set<string> {
   const adj = new Map<string, string[]>();
   for (const [id, owner] of Object.entries(pub.claimed)) {
     if (owner !== seat) continue;
-    const rt = ROUTE_BY_ID[id]!;
+    const rt = mapOf(pub).routeById[id]!;
     (adj.get(rt.a) ?? adj.set(rt.a, []).get(rt.a)!).push(rt.b);
     (adj.get(rt.b) ?? adj.set(rt.b, []).get(rt.b)!).push(rt.a);
   }
@@ -188,7 +195,7 @@ export function ticketCompleted(pub: TtrPublic, seat: Seat, t: TicketDef): boole
 export function longestPathLength(pub: TtrPublic, seat: Seat): number {
   const edges = Object.entries(pub.claimed)
     .filter(([, o]) => o === seat)
-    .map(([id]) => ROUTE_BY_ID[id]!);
+    .map(([id]) => mapOf(pub).routeById[id]!);
   if (edges.length === 0) return 0;
   const adj = new Map<string, { to: string; len: number; idx: number }[]>();
   edges.forEach((e, idx) => {
@@ -273,10 +280,16 @@ function resolveOffer(state: State, seat: Seat, keep: number[]): void {
   pub.ticketDeckSize = hidden.ticketDeck.length;
 }
 
-export const ticketToRide: GameModule<TtrPublic, TtrPrivate | Hidden, TtrMove> = {
-  slug: 'ticket-to-ride',
-  displayName: 'Ticket to Ride',
-  rulesVersion: '1.1.0',
+function makeTtrModule(
+  slug: string,
+  displayName: string,
+  mapId: string,
+): GameModule<TtrPublic, TtrPrivate | Hidden, TtrMove> {
+  return {
+  slug,
+  displayName,
+  description: `Claim train routes across ${MAPS[mapId]!.name} and complete secret destination tickets.`,
+  rulesVersion: '1.2.0',
   minPlayers: 2,
   maxPlayers: 5,
   teams: 'none',
@@ -289,11 +302,12 @@ export const ticketToRide: GameModule<TtrPublic, TtrPrivate | Hidden, TtrMove> =
     const hidden: Hidden = {
       trainDeck: rng.shuffle(deck),
       trainDiscard: [],
-      ticketDeck: rng.shuffle(TICKETS),
+      ticketDeck: rng.shuffle(MAPS[mapId]!.tickets),
     };
 
     const priv: Record<Seat, TtrPrivate | Hidden> = { [HIDDEN_ZONE]: hidden };
     const pub: TtrPublic = {
+      map: mapId,
       faceUp: [],
       deckSize: 0,
       discardSize: 0,
@@ -417,7 +431,7 @@ export const ticketToRide: GameModule<TtrPublic, TtrPrivate | Hidden, TtrMove> =
       if (privOf(s, seat).offer) throw new IllegalMove('Choose your tickets first');
       if (pub.drawnThisTurn > 0) throw new IllegalMove('You already drew cards this turn');
       const { route, color } = payload as { route: string; color?: TrainColor };
-      const def = ROUTE_BY_ID[route];
+      const def = mapOf(pub).routeById[route];
       if (!def) throw new IllegalMove('Unknown route');
       if (pub.claimed[route] !== undefined) throw new IllegalMove('Route already claimed');
       if ((pub.trainsLeft[seat] ?? 0) < def.length) throw new IllegalMove('Not enough trains');
@@ -464,7 +478,7 @@ export const ticketToRide: GameModule<TtrPublic, TtrPrivate | Hidden, TtrMove> =
     if (pub.phase !== 'PLAY' || seat !== currentSeat(pub)) return [];
     const moves: TtrMove[] = [];
     if (pub.drawnThisTurn === 0) {
-      for (const def of ROUTES) {
+      for (const def of mapOf(pub).routes) {
         if (pub.claimed[def.id] !== undefined) continue;
         if ((pub.trainsLeft[seat] ?? 0) < def.length) continue;
         for (const c of payableColors(priv.hand, def.color, def.length)) {
@@ -547,4 +561,8 @@ export const ticketToRide: GameModule<TtrPublic, TtrPrivate | Hidden, TtrMove> =
       } while (pub.removed.includes(currentSeat(pub)) && aliveSeats(pub).length > 0);
     }
   },
-};
+  };
+}
+
+export const ticketToRide = makeTtrModule('ticket-to-ride', 'Ticket to Ride', 'north-america');
+export const ticketToRideEurope = makeTtrModule('ticket-to-ride-europe', 'Ticket to Ride: Europe', 'europe');

@@ -1,12 +1,20 @@
 import React, { useState } from 'react';
 import type { CheckersPublic, CheckersMove } from '@gamebox/game-checkers';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { SEAT_HEX, SeatTokens, WinnerBanner, Prompt, Waiting } from './common.js';
+import type { GameSummary } from '@gamebox/shared-types';
+import { SeatTokens, SeatToken, WinnerBanner, Prompt, Waiting, useSlideAnim, useBoardFit } from './common.js';
 
-const SEAT_COLORS = SEAT_HEX;
+function cellXY(name: string, flipped: boolean | undefined, C: number): { x: number; y: number } {
+  const [c, r] = name.split(',').map(Number);
+  return {
+    x: (flipped ? 7 - c! : c!) * C + C / 2,
+    y: (flipped ? r! : 7 - r!) * C + C / 2,
+  };
+}
 
 function Board({
   view,
+  summary,
   flipped,
   selected,
   targets,
@@ -14,6 +22,7 @@ function Board({
   onSquare,
 }: {
   view: CheckersPublic;
+  summary: GameSummary;
   flipped?: boolean;
   selected?: string | null;
   targets?: Set<string>;
@@ -21,6 +30,14 @@ function Board({
   onSquare?: (name: string) => void;
 }) {
   const C = 60;
+  const lm = view.lastMove;
+  const moveKey = lm ? `${lm.from}-${lm.to}-${lm.captured ?? ''}` : null;
+  const slidePos = useSlideAnim(
+    moveKey,
+    lm ? cellXY(lm.from, flipped, C) : null,
+    lm ? cellXY(lm.to, flipped, C) : null,
+  );
+  const slidingPiece = slidePos && lm ? view.board[lm.to] : null;
   const cells = [];
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
@@ -41,15 +58,14 @@ function Board({
           {isLast && <rect x={x} y={y} width={C} height={C} fill="rgba(255,185,48,0.35)" />}
           {isSel && <rect x={x} y={y} width={C} height={C} fill="rgba(255,185,48,0.6)" />}
           {isTarget && <circle cx={x + C / 2} cy={y + C / 2} r={C * 0.16} fill="rgba(46,230,201,0.75)" />}
-          {piece && (
+          {piece && !(slidePos && lm?.to === name) && (
             <>
-              <circle cx={x + C / 2} cy={y + C / 2 + 2.5} r={C * 0.37} fill="rgba(0,0,0,0.4)" />
-              <circle cx={x + C / 2} cy={y + C / 2} r={C * 0.37}
-                fill={SEAT_COLORS[piece.seat % 2]}
-                stroke={isFrom ? '#ffffff' : 'rgba(0,0,0,0.5)'} strokeWidth={isFrom ? 3 : 2} />
+              <SeatToken summary={summary} seat={piece.seat} cx={x + C / 2} cy={y + C / 2} r={C * 0.37} />
+              {isFrom && (
+                <circle cx={x + C / 2} cy={y + C / 2} r={C * 0.37} fill="none" stroke="#ffffff" strokeWidth={3} />
+              )}
               <circle cx={x + C / 2} cy={y + C / 2} r={C * 0.26} fill="none"
                 stroke="rgba(0,0,0,0.25)" strokeWidth={2} />
-              <circle cx={x + C / 2 - 6} cy={y + C / 2 - 7} r={C * 0.09} fill="rgba(255,255,255,0.35)" />
               {piece.king && (
                 <text x={x + C / 2} y={y + C / 2 + 7} textAnchor="middle" fontSize={22} fill="#3c2500" fontWeight={900}>♛</text>
               )}
@@ -60,10 +76,20 @@ function Board({
     }
   }
   const M = 10;
+  const fit = useBoardFit();
   return (
-    <svg viewBox={`${-M} ${-M} ${8 * C + M * 2} ${8 * C + M * 2}`} style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
+    <svg viewBox={`${-M} ${-M} ${8 * C + M * 2} ${8 * C + M * 2}`} preserveAspectRatio={fit}
+      style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}>
       <rect x={-M} y={-M} width={8 * C + M * 2} height={8 * C + M * 2} rx={10} fill="#241a12" />
       {cells}
+      {slidePos && slidingPiece && (
+        <g style={{ filter: 'drop-shadow(0 3px 4px rgba(0,0,0,0.5))', pointerEvents: 'none' }}>
+          <SeatToken summary={summary} seat={slidingPiece.seat} cx={slidePos.x} cy={slidePos.y} r={C * 0.4} />
+          {slidingPiece.king && (
+            <text x={slidePos.x} y={slidePos.y + 7} textAnchor="middle" fontSize={22} fill="#3c2500" fontWeight={900}>♛</text>
+          )}
+        </g>
+      )}
     </svg>
   );
 }
@@ -74,7 +100,7 @@ function TvView({ state }: TvViewProps<CheckersPublic>) {
   return (
     <div className="tv-main">
       <div className="tv-board">
-        <Board view={view} />
+        <Board view={view} summary={state.summary} />
       </div>
       <div className="tv-sidebar">
         <SeatTokens summary={state.summary} activeSeats={state.activeSeats} />
@@ -122,7 +148,7 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<CheckersPub
         )}
       </div>
       <div className="board-frame">
-        <Board view={view} flipped={yourSeat === 1} selected={selected} targets={targets}
+        <Board view={view} summary={state.summary} flipped={yourSeat === 1} selected={selected} targets={targets}
           froms={myTurn ? froms : undefined} onSquare={onSquare} />
       </div>
     </div>

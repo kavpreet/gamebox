@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { PictionaryPublic, PictionaryMove, Stroke } from '@gamebox/game-pictionary';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, WinnerBanner, Prompt } from './common.js';
+import { seatName, SeatDot, WinnerBanner, Prompt } from './common.js';
 
 type PictionaryView = PictionaryPublic & { word: string | null };
 
@@ -144,7 +144,7 @@ function TvView({ state }: TvViewProps<PictionaryView>) {
       <div className="tv-sidebar">
         {state.summary.players.filter((p) => view.order.includes(p.seat)).map((p) => (
           <div key={p.seat} className={`tv-player-chip ${p.seat === view.drawer ? 'active' : ''}`}>
-            <span className={`token seat-color-${p.seat % 6}`} />
+            <SeatDot summary={state.summary} seat={p.seat} />
             <span className="grow">{p.displayName} {p.seat === view.drawer && '🖌️'}</span>
             <strong>{view.scores[p.seat] ?? 0}</strong>
           </div>

@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
+import type { GameSummary } from '@gamebox/shared-types';
 import type { CCPublic, CCMove } from '@gamebox/game-chinese-checkers';
 import { allCells, destinations } from '@gamebox/game-chinese-checkers';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, SEAT_HEX, SeatTokens, WinnerBanner, Prompt, Waiting } from './common.js';
+import { seatName, SeatToken, SeatTokens, WinnerBanner, Prompt, Waiting, useSlideAnim, useBoardFit } from './common.js';
 
-const SEAT_COLORS = SEAT_HEX;
 const R = 16; // hole radius in svg units
 const SP = 38; // spacing
 
@@ -22,21 +22,32 @@ const EXTENT = 8.7 * SP;
 
 function Board({
   view,
+  summary,
   yourSeat,
   selected,
   targets,
   onCell,
 }: {
   view: CCPublic;
+  summary: GameSummary;
   yourSeat?: number;
   selected?: string | null;
   targets?: Set<string>;
   onCell?: (cell: string) => void;
 }) {
+  const lm = view.lastMove;
+  const moveKey = lm ? `${lm.seat}-${lm.from}-${lm.to}` : null;
+  const slidePos = useSlideAnim(
+    moveKey,
+    lm ? (({ px, py }) => ({ x: px, y: py }))(xy(lm.from)) : null,
+    lm ? (({ px, py }) => ({ x: px, y: py }))(xy(lm.to)) : null,
+  );
+  const fit = useBoardFit();
   return (
     <svg
       viewBox={`${-EXTENT} ${-EXTENT} ${2 * EXTENT} ${2 * EXTENT}`}
-      style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}
+      preserveAspectRatio={fit}
+      style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}
     >
       <defs>
         <radialGradient id="cc-bg" cx="50%" cy="45%" r="75%">
@@ -50,17 +61,22 @@ function Board({
         const owner = view.pegs[cell];
         const isSel = selected === cell;
         const isTarget = targets?.has(cell);
-        const wasLast = view.lastMove && (view.lastMove.from === cell || view.lastMove.to === cell);
+        const wasLast = lm && (lm.from === cell || lm.to === cell);
+        const hidePeg = slidePos && lm?.to === cell;
         return (
           <g key={cell} onClick={onCell ? () => onCell(cell) : undefined} style={onCell ? { cursor: 'pointer' } : undefined}>
             {/* hole */}
             <circle cx={px} cy={py + 1.5} r={R} fill="rgba(0,0,0,0.5)" />
-            <circle cx={px} cy={py} r={R}
-              fill={owner !== undefined ? SEAT_COLORS[owner % 6] : '#0d1024'}
-              stroke={isSel ? '#ffffff' : isTarget ? '#2ee6c9' : wasLast ? '#ffb930' : '#333c68'}
-              strokeWidth={isSel || isTarget ? 3.5 : 1.5}
-            />
-            {owner !== undefined && <circle cx={px - R * 0.3} cy={py - R * 0.3} r={R * 0.28} fill="rgba(255,255,255,0.4)" />}
+            {owner !== undefined && !hidePeg ? (
+              <SeatToken summary={summary} seat={owner} cx={px} cy={py} r={R} />
+            ) : (
+              <circle cx={px} cy={py} r={R} fill="#0d1024" stroke="#333c68" strokeWidth={1.5} />
+            )}
+            {(isSel || isTarget || wasLast) && (
+              <circle cx={px} cy={py} r={R} fill="none"
+                stroke={isSel ? '#ffffff' : isTarget ? '#2ee6c9' : '#ffb930'}
+                strokeWidth={3.5} />
+            )}
             {isTarget && owner === undefined && (
               <circle cx={px} cy={py} r={R * 0.35} fill="rgba(46,230,201,0.8)">
                 <animate attributeName="r" values={`${R * 0.28};${R * 0.42};${R * 0.28}`} dur="1.2s" repeatCount="indefinite" />
@@ -69,6 +85,11 @@ function Board({
           </g>
         );
       })}
+      {slidePos && lm && (
+        <g style={{ filter: 'drop-shadow(0 3px 4px rgba(0,0,0,0.5))', pointerEvents: 'none' }}>
+          <SeatToken summary={summary} seat={lm.seat} cx={slidePos.x} cy={slidePos.y} r={R} />
+        </g>
+      )}
     </svg>
   );
 }
@@ -79,7 +100,7 @@ function TvView({ state }: TvViewProps<CCPublic>) {
   return (
     <div className="tv-main">
       <div className="tv-board">
-        <Board view={view} />
+        <Board view={view} summary={state.summary} />
       </div>
       <div className="tv-sidebar">
         <SeatTokens summary={state.summary} activeSeats={state.activeSeats} />
@@ -125,7 +146,7 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<CCPublic, C
         )}
       </div>
       <div className="board-frame">
-        <Board view={view} yourSeat={yourSeat} selected={selected} targets={targets} onCell={onCell} />
+        <Board view={view} summary={state.summary} yourSeat={yourSeat} selected={selected} targets={targets} onCell={onCell} />
       </div>
     </div>
   );

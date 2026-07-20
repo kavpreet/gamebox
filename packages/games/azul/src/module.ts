@@ -260,6 +260,7 @@ function legalDraftsFor(pub: AzulPublic, seat: Seat): AzulMove[] {
 export const azul: GameModule<AzulPublic, Hidden | Record<string, never>, AzulMove> = {
   slug: 'azul',
   displayName: 'Azul',
+  description: 'Draft glazed tiles and mosaic your palace wall — waste nothing.',
   rulesVersion: '1.0.0',
   minPlayers: 2,
   maxPlayers: 4,

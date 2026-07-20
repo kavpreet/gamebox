@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import type { PandemicPublic, PandemicMove } from '@gamebox/game-pandemic';
 import { CITIES, type Disease } from '@gamebox/game-pandemic';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, WinnerBanner, Prompt, Waiting, EventLine } from './common.js';
+import { seatName, WinnerBanner, Prompt, Waiting, EventLine, useBoardFit } from './common.js';
 
 const DISEASE_HEX: Record<Disease, string> = {
   blue: '#45a6ff',
@@ -63,8 +63,10 @@ function Map({
     }
   }
 
+  const fit = useBoardFit();
   return (
-    <svg viewBox="0 0 1000 660" style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
+    <svg viewBox="0 0 1000 660" preserveAspectRatio={fit}
+      style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}>
       <defs>
         <radialGradient id="pan-ocean" cx="50%" cy="40%" r="80%">
           <stop offset="0%" stopColor="#101a3c" />

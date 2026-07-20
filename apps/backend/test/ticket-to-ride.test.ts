@@ -1,15 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { GameRuntime } from '@gamebox/core-engine';
 import {
-  ticketToRide,
+  ticketToRide, ticketToRideEurope, MAPS,
   CITY_POS, ROUTES, TICKETS, ROUTE_POINTS, TRAINS_PER_PLAYER,
   canAfford, payableColors, longestPathLength, ticketCompleted,
   type TtrPublic, type Card,
 } from '@gamebox/game-ticket-to-ride';
 
-function newGame(seed = 1, players = 3) {
+function newGame(seed = 1, players = 3, mod: typeof ticketToRide = ticketToRide) {
   const seats = Array.from({ length: players }, (_, i) => ({ seat: i }));
-  return GameRuntime.start(ticketToRide, seats, seed);
+  return GameRuntime.start(mod, seats, seed);
 }
 
 function pub(rt: GameRuntime): TtrPublic {
@@ -56,6 +56,57 @@ describe('ticket to ride map', () => {
       for (const n of adj.get(q.pop()!) ?? []) if (!seen.has(n)) { seen.add(n); q.push(n); }
     }
     expect(seen.size).toBe(Object.keys(CITY_POS).length);
+  });
+});
+
+describe('ticket to ride: multiple maps', () => {
+  it('every registered map is internally consistent and fully connected', () => {
+    for (const map of Object.values(MAPS)) {
+      const ids = new Set<string>();
+      for (const r of map.routes) {
+        expect(map.cityPos[r.a], `${map.id}: ${r.id}`).toBeDefined();
+        expect(map.cityPos[r.b], `${map.id}: ${r.id}`).toBeDefined();
+        expect(ids.has(r.id)).toBe(false);
+        ids.add(r.id);
+      }
+      for (const t of map.tickets) {
+        expect(map.cityPos[t.a], `${map.id}: ${t.a}->${t.b}`).toBeDefined();
+        expect(map.cityPos[t.b], `${map.id}: ${t.a}->${t.b}`).toBeDefined();
+      }
+      const adj = new Map<string, string[]>();
+      for (const r of map.routes) {
+        (adj.get(r.a) ?? adj.set(r.a, []).get(r.a)!).push(r.b);
+        (adj.get(r.b) ?? adj.set(r.b, []).get(r.b)!).push(r.a);
+      }
+      const start = Object.keys(map.cityPos)[0]!;
+      const seen = new Set([start]);
+      const q = [start];
+      while (q.length) {
+        for (const n of adj.get(q.pop()!) ?? []) if (!seen.has(n)) { seen.add(n); q.push(n); }
+      }
+      expect(seen.size, map.id).toBe(Object.keys(map.cityPos).length);
+    }
+  });
+
+  it('picking Europe plays a full game on the Europe map, independent of North America', () => {
+    const rt = newGame(3, 2, ticketToRideEurope);
+    const view = rt.view('SPECTATOR') as TtrPublic;
+    expect(view.map).toBe('europe');
+    // North America's start city shouldn't exist on this board
+    expect(MAPS['europe']!.cityPos['seattle']).toBeUndefined();
+    expect(MAPS['europe']!.cityPos['paris']).toBeDefined();
+
+    for (const seat of [...rt.activeSeats()]) rt.applyMove(seat, 'CHOOSE_TICKETS', { keep: [0, 1] });
+    let guard = 0;
+    while (rt.currentStatus === 'active' && guard++ < 5000) {
+      const seat = rt.activeSeats()[0]!;
+      const moves = rt.legalMoves(seat) as any[];
+      expect(moves.length).toBeGreaterThan(0);
+      const claims = moves.filter((m) => m.kind === 'CLAIM_ROUTE');
+      const move = claims[guard % Math.max(1, claims.length)] ?? moves[guard % moves.length];
+      rt.applyMove(seat, move.kind, move);
+    }
+    expect(rt.currentStatus).toBe('completed');
   });
 });
 

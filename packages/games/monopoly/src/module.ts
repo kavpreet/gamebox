@@ -275,6 +275,7 @@ function requireManagement(pub: MonopolyPublic, seat: Seat): void {
 export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove> = {
   slug: 'monopoly',
   displayName: 'Monopoly',
+  description: 'Buy, build, and bankrupt your friends around the board.',
   rulesVersion: '1.0.0',
   minPlayers: 2,
   maxPlayers: 6,

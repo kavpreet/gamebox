@@ -223,6 +223,9 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
   return {
     slug: variant,
     displayName: variant === 'uno' ? 'UNO' : 'UNO Flip',
+    description: variant === 'uno'
+      ? 'Match colors and numbers, sling action cards, call UNO on your last card.'
+      : 'Double-sided UNO: a Flip card swaps everyone to the brutal dark side.',
     rulesVersion: '1.1.0',
     minPlayers: 2,
     maxPlayers: 8,

@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import type { MonopolyPublic, MonopolyMove } from '@gamebox/game-monopoly';
 import { BOARD, rentFor } from '@gamebox/game-monopoly';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, SEAT_HEX, WinnerBanner, Prompt, Waiting, Die, EventLine } from './common.js';
+import type { GameSummary } from '@gamebox/shared-types';
+import { seatName, seatColor, SeatDot, SeatToken, WinnerBanner, Prompt, Waiting, Die, EventLine, useBoardFit } from './common.js';
 
 const GROUP_HEX: Record<string, string> = {
   brown: '#96603a', 'light-blue': '#7fd4f5', pink: '#e177c1', orange: '#f19b4c',
@@ -27,7 +28,7 @@ function cellOf(pos: number): [number, number] {
   return [10, pos - 30];
 }
 
-function Board({ view }: { view: MonopolyPublic }) {
+function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }) {
   const C = 62;
   const cells: React.ReactElement[] = [];
   BOARD.forEach((sp, pos) => {
@@ -75,7 +76,7 @@ function Board({ view }: { view: MonopolyPublic }) {
         )}
         {prop && (
           <rect x={x + 4} y={y + C - 9} width={C - 8} height={5.5} rx={2.5}
-            fill={SEAT_HEX[prop.owner % 6]} opacity={prop.mortgaged ? 0.3 : 1} />
+            fill={seatColor(summary, prop.owner)} opacity={prop.mortgaged ? 0.3 : 1} />
         )}
         {prop && prop.houses > 0 && (
           prop.houses === 5 ? (
@@ -107,17 +108,18 @@ function Board({ view }: { view: MonopolyPublic }) {
       const tx = cx * C + 13 + (i % 3) * 13;
       const ty = cy * C + 42 + Math.floor(i / 3) * 6;
       tokens.push(
-        <g key={s}>
-          <circle cx={tx} cy={ty} r={8.5} fill={SEAT_HEX[s % 6]} stroke="#ffffff" strokeWidth={2} />
-          <circle cx={tx - 2.5} cy={ty - 2.5} r={2.5} fill="rgba(255,255,255,0.55)" />
+        <g key={s} className="board-token" data-pos={pos}>
+          <SeatToken summary={summary} seat={s} cx={tx} cy={ty} r={8.5} />
         </g>,
       );
     });
   }
 
   const W = 11 * C;
+  const fit = useBoardFit();
   return (
-    <svg viewBox={`0 0 ${W} ${W}`} style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
+    <svg viewBox={`0 0 ${W} ${W}`} preserveAspectRatio={fit}
+      style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}>
       <defs>
         <linearGradient id="mono-center" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor="#173230" />
@@ -172,7 +174,7 @@ function TvView({ state }: TvViewProps<MonopolyPublic>) {
   return (
     <div className="tv-main">
       <div className="tv-board">
-        <Board view={view} />
+        <Board view={view} summary={state.summary} />
       </div>
       <div className="tv-sidebar">
         {view.order.map((s) => {
@@ -181,7 +183,7 @@ function TvView({ state }: TvViewProps<MonopolyPublic>) {
           return (
             <div key={s} className={`tv-player-chip ${state.activeSeats.includes(s) ? 'active' : ''}`}
               style={p.bankrupt ? { opacity: 0.4 } : undefined}>
-              <span className={`token seat-color-${s % 6}`} />
+              <SeatDot summary={state.summary} seat={s} />
               <span className="grow">
                 {seatName(state.summary, s)}
                 {p.inJail && ' 🔒'}
@@ -325,7 +327,7 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
           return (
             <div key={s} className="row between" style={p.bankrupt ? { opacity: 0.4 } : undefined}>
               <span className="row" style={{ gap: 6 }}>
-                <span className={`token seat-color-${s % 6}`} style={{ display: 'inline-block', width: 11, height: 11, borderRadius: 6 }} />
+                <SeatDot summary={state.summary} seat={s} size={13} />
                 {seatName(state.summary, s)}{s === yourSeat && ' (you)'}
                 {p.inJail && ' 🔒'}{p.bankrupt && ' 💀'}
                 {state.activeSeats.includes(s) && <span className="badge gold-badge">turn</span>}

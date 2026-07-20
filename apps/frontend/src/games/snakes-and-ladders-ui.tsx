@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import type { GameSummary } from '@gamebox/shared-types';
 import type { SnlPublic } from '@gamebox/game-snakes-and-ladders';
 import { SNAKES, LADDERS } from '@gamebox/game-snakes-and-ladders';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, SEAT_HEX, SeatTokens, WinnerBanner, Prompt, Waiting, Die } from './common.js';
+import { seatName, SeatDot, SeatToken, SeatTokens, WinnerBanner, Prompt, Waiting, Die, useBoardFit } from './common.js';
 
 const CELL = 60;
 const PAD = 8;
@@ -18,10 +19,87 @@ function squareXY(square: number): { x: number; y: number } {
   };
 }
 
-const SEAT_COLORS = SEAT_HEX;
+interface AnimState {
+  seat: number;
+  x: number;
+  y: number;
+}
 
-function Board({ view, size = '100%' }: { view: SnlPublic; size?: string }) {
+function easeInOutQuad(t: number): number {
+  return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+}
+
+/**
+ * Hops the just-moved token square by square, then — if it landed on a
+ * snake or ladder — glides it smoothly to the slide's far end. Runs only
+ * for the seat named in the newest `lastRoll`; every other token renders
+ * at its authoritative resting square.
+ */
+function useTokenAnimation(lastRoll: SnlPublic['lastRoll']): AnimState | null {
+  const [anim, setAnim] = useState<AnimState | null>(null);
+  const rollKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!lastRoll) return;
+    const key = `${lastRoll.seat}:${lastRoll.from}:${lastRoll.to}:${lastRoll.die}:${lastRoll.slide ?? 'x'}`;
+    if (rollKey.current === key) return;
+    rollKey.current = key;
+
+    let cancelled = false;
+    const seat = lastRoll.seat;
+    const hopSquares: number[] = [];
+    for (let sq = lastRoll.from + 1; sq <= lastRoll.to; sq++) hopSquares.push(sq);
+    if (hopSquares.length === 0) hopSquares.push(lastRoll.to);
+    let i = 0;
+
+    const finish = () => {
+      if (!cancelled) setTimeout(() => !cancelled && setAnim(null), 150);
+    };
+
+    const slide = (from: number, to: number) => {
+      const a = squareXY(from);
+      const b = squareXY(to);
+      const duration = 550;
+      const start = performance.now();
+      const frame = (now: number) => {
+        if (cancelled) return;
+        const t = Math.min(1, (now - start) / duration);
+        const e = easeInOutQuad(t);
+        setAnim({ seat, x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e });
+        if (t < 1) requestAnimationFrame(frame);
+        else finish();
+      };
+      requestAnimationFrame(frame);
+    };
+
+    const hop = () => {
+      if (cancelled) return;
+      const sq = hopSquares[i]!;
+      const { x, y } = squareXY(sq);
+      setAnim({ seat, x, y });
+      i++;
+      if (i < hopSquares.length) {
+        setTimeout(hop, 130);
+      } else if (lastRoll.slide !== null) {
+        slide(lastRoll.to, lastRoll.slide);
+      } else {
+        finish();
+      }
+    };
+    hop();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastRoll?.seat, lastRoll?.from, lastRoll?.to, lastRoll?.die, lastRoll?.slide]);
+
+  return anim;
+}
+
+function Board({ view, summary, size = '100%' }: { view: SnlPublic; summary: GameSummary; size?: string }) {
   const W = PAD * 2 + CELL * 10;
+  const anim = useTokenAnimation(view.lastRoll);
   const cells = [];
   for (let sq = 1; sq <= 100; sq++) {
     const { x, y } = squareXY(sq);
@@ -89,10 +167,11 @@ function Board({ view, size = '100%' }: { view: SnlPublic; size?: string }) {
     );
   }
 
-  // Tokens, fanned out when sharing a square
+  // Tokens, fanned out when sharing a square — the animating seat (if any)
+  // is drawn separately, on top, at its live hop/slide coordinates.
   const bySquare = new Map<number, number[]>();
   for (const [seatStr, pos] of Object.entries(view.positions)) {
-    if (pos === 0) continue;
+    if (pos === 0 || Number(seatStr) === anim?.seat) continue;
     const arr = bySquare.get(pos) ?? [];
     arr.push(Number(seatStr));
     bySquare.set(pos, arr);
@@ -102,40 +181,26 @@ function Board({ view, size = '100%' }: { view: SnlPublic; size?: string }) {
     const { x, y } = squareXY(sq);
     seats.forEach((seat, i) => {
       const offset = (i - (seats.length - 1) / 2) * 16;
-      tokens.push(
-        <circle
-          key={`t${seat}`}
-          cx={x + offset}
-          cy={y + 8}
-          r={11}
-          fill={SEAT_COLORS[seat % SEAT_COLORS.length]}
-          stroke="#0f1220"
-          strokeWidth={2.5}
-        />,
-      );
+      tokens.push(<SeatToken key={`t${seat}`} summary={summary} seat={seat} cx={x + offset} cy={y + 8} r={11} />);
     });
+  }
+  if (anim) {
+    tokens.push(<SeatToken key={`t${anim.seat}`} summary={summary} seat={anim.seat} cx={anim.x} cy={anim.y + 8} r={12} />);
   }
 
   // Start area tokens (position 0)
   const waiting = Object.entries(view.positions).filter(([, p]) => p === 0);
+  const fit = useBoardFit();
 
   return (
     <svg viewBox={`0 0 ${W} ${W + (waiting.length ? 34 : 0)}`}
-      preserveAspectRatio="xMidYMid meet"
+      preserveAspectRatio={fit}
       style={{ maxWidth: size, width: '100%', height: '100%', maxHeight: '100%' }}>
       {cells}
       {links}
       {tokens}
       {waiting.map(([seatStr], i) => (
-        <circle
-          key={`w${seatStr}`}
-          cx={PAD + 14 + i * 30}
-          cy={W + 14}
-          r={11}
-          fill={SEAT_COLORS[Number(seatStr) % SEAT_COLORS.length]}
-          stroke="#0f1220"
-          strokeWidth={2.5}
-        />
+        <SeatToken key={`w${seatStr}`} summary={summary} seat={Number(seatStr)} cx={PAD + 14 + i * 30} cy={W + 14} r={11} />
       ))}
     </svg>
   );
@@ -147,7 +212,7 @@ function TvView({ state }: TvViewProps<SnlPublic>) {
   return (
     <div className="tv-main">
       <div className="tv-board">
-        <Board view={view} />
+        <Board view={view} summary={state.summary} />
       </div>
       <div className="tv-sidebar">
         <SeatTokens summary={state.summary} activeSeats={state.activeSeats} />
@@ -207,7 +272,7 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<SnlPublic, 
           <div key={seat} className="row between">
             <span className="row" style={{ gap: 6 }}>
               <span className="dim small">#{i + 1}</span>
-              <span className={`token seat-color-${seat % 6}`} style={{ display: 'inline-block', width: 11, height: 11, borderRadius: 6 }} />
+              <SeatDot summary={state.summary} seat={seat} size={16} />
               {seatName(state.summary, seat)}{seat === yourSeat && ' (you)'}
             </span>
             <strong>{pos}</strong>

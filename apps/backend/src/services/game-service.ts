@@ -6,7 +6,14 @@ import {
   type GameModule,
   type RuntimeSnapshot,
 } from '@gamebox/core-engine';
-import type { GameStatus, Seat, GameSummary, SeatAssignment } from '@gamebox/shared-types';
+import {
+  isValidSeatColor,
+  isValidSeatIcon,
+  type GameStatus,
+  type Seat,
+  type GameSummary,
+  type SeatAssignment,
+} from '@gamebox/shared-types';
 import type { Database, GamesTable } from '../db/schema.js';
 import { newId, nowIso } from '../db/index.js';
 import { getGame, listGames } from '../games/registry.js';
@@ -155,6 +162,49 @@ export class GameService {
     return this.getSummary(gameId);
   }
 
+  /**
+   * Each player picks their own look. Rules (enforced here, not just in the
+   * UI, since the UI can't be trusted): every non-transparent color must be
+   * unique among this game's seats; every non-null icon must be unique;
+   * a plain-color (no icon) player may not be transparent — the board would
+   * render an invisible piece.
+   */
+  async setAppearance(
+    gameId: string,
+    userId: string,
+    color: string | null,
+    icon: string | null,
+  ): Promise<GameSummary> {
+    const game = await this.requireGame(gameId);
+    if (game.status !== 'lobby') throw new GameServiceError('Can only customize before the game starts', 'CONFLICT');
+    if (color !== null && !isValidSeatColor(color)) throw new GameServiceError('Unknown color', 'BAD_REQUEST');
+    if (icon !== null && !isValidSeatIcon(icon)) throw new GameServiceError('Unknown icon', 'BAD_REQUEST');
+    if (color === 'transparent' && icon === null) {
+      throw new GameServiceError('Pick an icon to use a transparent background', 'BAD_REQUEST');
+    }
+
+    const players = await this.playersOf(gameId);
+    const me = players.find((p) => p.user_id === userId);
+    if (!me) throw new GameServiceError('You are not in this game', 'FORBIDDEN');
+
+    if (color !== null && color !== 'transparent') {
+      const clash = players.some((p) => p.seat_index !== me.seat_index && p.color === color);
+      if (clash) throw new GameServiceError('Another player already has that color', 'CONFLICT');
+    }
+    if (icon !== null) {
+      const clash = players.some((p) => p.seat_index !== me.seat_index && p.icon === icon);
+      if (clash) throw new GameServiceError('Another player already has that icon', 'CONFLICT');
+    }
+
+    await this.db
+      .updateTable('game_players')
+      .set({ color, icon })
+      .where('game_id', '=', gameId)
+      .where('seat_index', '=', me.seat_index)
+      .execute();
+    return this.getSummary(gameId);
+  }
+
   async startGame(gameId: string, userId: string): Promise<GameRuntime> {
     const game = await this.requireGame(gameId);
     if (game.created_by !== userId) throw new GameServiceError('Only the host can start the game', 'FORBIDDEN');
@@ -293,6 +343,8 @@ export class GameService {
         'game_players.team_index',
         'game_players.connected',
         'game_players.eliminated_at',
+        'game_players.color',
+        'game_players.icon',
         'user.name as display_name',
       ])
       .where('game_players.game_id', '=', gameId)
@@ -306,6 +358,8 @@ export class GameService {
       team: p.team_index,
       connected: Boolean(p.connected),
       eliminated: Boolean(p.eliminated_at),
+      color: p.color,
+      icon: p.icon,
     }));
 
     return {
@@ -429,6 +483,8 @@ export class GameService {
         connected: 0,
         eliminated_at: null,
         last_seen_at: nowIso(),
+        color: null,
+        icon: null,
       })
       .execute();
   }

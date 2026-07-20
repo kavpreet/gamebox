@@ -87,6 +87,7 @@ export function legalSteps(pub: CheckersPublic, seat: Seat): StepMove[] {
 export const checkers: GameModule<CheckersPublic, CheckersPrivate, CheckersMove> = {
   slug: 'checkers',
   displayName: 'Checkers',
+  description: 'Jump, capture, and crown your kings on the classic 8×8 board.',
   rulesVersion: '1.0.0',
   minPlayers: 2,
   maxPlayers: 2,

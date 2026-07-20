@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { RummyPublic, RummyMove, Card, Meld } from '@gamebox/game-rummy';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, WinnerBanner, Prompt, Waiting, EventLine } from './common.js';
+import { seatName, SeatDot, WinnerBanner, Prompt, Waiting, EventLine } from './common.js';
 
 type RummyView = RummyPublic & { hand: Card[] | null };
 
@@ -104,7 +104,7 @@ function TvView({ state }: TvViewProps<RummyView>) {
           .filter((p) => view.order.includes(p.seat))
           .map((p) => (
             <div key={p.seat} className={`tv-player-chip ${state.activeSeats.includes(p.seat) ? 'active' : ''}`}>
-              <span className={`token seat-color-${p.seat % 6}`} />
+              <SeatDot summary={state.summary} seat={p.seat} />
               <span className="grow">{p.displayName}</span>
               <strong>{view.handCounts[p.seat] ?? 0}</strong>
             </div>

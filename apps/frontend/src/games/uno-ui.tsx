@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import type { UnoPublic, UnoMove, Face, UnoColor } from '@gamebox/game-uno';
 import type { Seat } from '@gamebox/shared-types';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, WinnerBanner, Prompt } from './common.js';
+import { seatName, SeatDot, WinnerBanner, Prompt } from './common.js';
 
 /** Player view carries `hand`; Flip also carries every hand's inactive faces. */
 type UnoView = UnoPublic & {
@@ -194,7 +194,7 @@ function TvView({ state }: TvViewProps<UnoView>) {
               <div key={p.seat}
                 className={`tv-player-chip ${p.seat === turnSeat ? 'active' : ''}`}
                 style={{ flexWrap: 'wrap' }}>
-                <span className={`token seat-color-${p.seat % 6}`} />
+                <SeatDot summary={state.summary} seat={p.seat} />
                 <span className="grow">
                   {p.displayName}
                   {declared && <span className="badge gold-badge" style={{ marginLeft: 6 }}>UNO! 🔔</span>}
