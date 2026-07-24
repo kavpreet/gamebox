@@ -3,7 +3,7 @@ import type { GameSummary } from '@gamebox/shared-types';
 import type { TtrPublic, TtrMove, Card, TicketView, TrainColor, TtrMapDef } from '@gamebox/game-ticket-to-ride';
 import { MAPS } from '@gamebox/game-ticket-to-ride';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, seatColor, SeatDot, WinnerBanner, Prompt, Waiting, useBoardFit } from './common.js';
+import { seatName, seatColor, SeatDot, WinnerBanner, Prompt, Waiting, useBoardFit, FxDefs, RebirthPulse } from './common.js';
 
 type TtrView = TtrPublic & {
   hand?: Card[];
@@ -82,27 +82,49 @@ function TtrMap({ view, summary, claimable, onRoute }: {
 }) {
   const mapDef = mapDefOf(view);
   const fit = useBoardFit();
+
+  // pop + pulse a route the moment it gets claimed (skip initial mount)
+  const seenClaimed = React.useRef<Set<string> | null>(null);
+  const firstRender = seenClaimed.current === null;
+  if (seenClaimed.current === null) seenClaimed.current = new Set(Object.keys(view.claimed));
+  const isFresh = (id: string) => !firstRender && !seenClaimed.current!.has(id);
+  const freshIds = Object.keys(view.claimed).filter(isFresh);
+  React.useEffect(() => {
+    for (const id of Object.keys(view.claimed)) seenClaimed.current!.add(id);
+  }, [view.claimed]);
+
   return (
     <svg viewBox="0 0 1000 620" preserveAspectRatio={fit}
       style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}>
+      <FxDefs />
       <defs>
         <radialGradient id="ttr-bg" cx="50%" cy="42%" r="80%">
-          <stop offset="0%" stopColor="#14203e" />
-          <stop offset="100%" stopColor="#0a0f26" />
+          <stop offset="0%" stopColor="#1a2850" />
+          <stop offset="100%" stopColor="#0b102c" />
         </radialGradient>
       </defs>
       <rect width={1000} height={620} rx={16} fill="url(#ttr-bg)" />
       {mapDef.routes.map((r) => (
-        <RouteSegments
-          key={r.id}
-          mapDef={mapDef}
-          summary={summary}
-          id={r.id}
-          owner={view.claimed[r.id]}
-          highlight={claimable?.has(r.id)}
-          onClick={onRoute && claimable?.has(r.id) ? () => onRoute(r.id) : undefined}
-        />
+        <g key={r.id} className={isFresh(r.id) && view.claimed[r.id] !== undefined ? 'gb-pop' : undefined}>
+          <RouteSegments
+            mapDef={mapDef}
+            summary={summary}
+            id={r.id}
+            owner={view.claimed[r.id]}
+            highlight={claimable?.has(r.id)}
+            onClick={onRoute && claimable?.has(r.id) ? () => onRoute(r.id) : undefined}
+          />
+        </g>
       ))}
+      {freshIds.map((id) => {
+        const def = mapDef.routeById[id]!;
+        const [ax, ay] = mapDef.cityPos[def.a]!;
+        const [bx, by] = mapDef.cityPos[def.b]!;
+        return (
+          <RebirthPulse key={`fx-${id}`} x={((ax + bx) / 2) * S} y={((ay + by) / 2) * S}
+            color={seatColor(summary, view.claimed[id]!)} r={26} />
+        );
+      })}
       {Object.entries(mapDef.cityPos).map(([c, [x, y]]) => (
         <g key={c}>
           <circle cx={x * S} cy={y * S} r={7.5} fill="#f2e6c8" stroke="#0a0e24" strokeWidth={2.5} />

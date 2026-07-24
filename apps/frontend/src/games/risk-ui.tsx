@@ -3,7 +3,10 @@ import type { RiskPublic, RiskMove } from '@gamebox/game-risk';
 import { ADJACENCY } from '@gamebox/game-risk';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
 import type { GameSummary } from '@gamebox/shared-types';
-import { seatName, seatColor, SeatTokens, WinnerBanner, Prompt, Waiting, useBoardFit } from './common.js';
+import {
+  seatName, seatColor, SeatTokens, WinnerBanner, Prompt, Waiting, useBoardFit,
+  FxDefs, CaptureBlast, RebirthPulse, useRecentChange,
+} from './common.js';
 
 /** Abstract world layout: territory → (x, y) in a 100×72 space. */
 const POS: Record<string, [number, number]> = {
@@ -69,13 +72,17 @@ function Map({
   }
 
   const fit = useBoardFit();
+  const battle = view.lastBattle;
+  const battleKey = battle ? JSON.stringify(battle) : null;
+  const showBattle = useRecentChange(battleKey, 1000);
   return (
     <svg viewBox="0 0 1000 720" preserveAspectRatio={fit}
       style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}>
+      <FxDefs />
       <defs>
         <radialGradient id="risk-bg" cx="50%" cy="40%" r="80%">
-          <stop offset="0%" stopColor="#111a3a" />
-          <stop offset="100%" stopColor="#0a0e24" />
+          <stop offset="0%" stopColor="#16224e" />
+          <stop offset="100%" stopColor="#0a0e28" />
         </radialGradient>
       </defs>
       <rect width={1000} height={720} rx={16} fill="url(#risk-bg)" />
@@ -84,6 +91,7 @@ function Map({
         const terr = view.territories[t]!;
         const isSel = selected === t;
         const isHi = highlights?.has(t);
+        const justConquered = showBattle && battle?.conquered && battle.to === t;
         return (
           <g key={t} onClick={onTerritory ? () => onTerritory(t) : undefined}
             style={onTerritory ? { cursor: 'pointer' } : undefined}>
@@ -93,22 +101,44 @@ function Map({
               </circle>
             )}
             <circle cx={x * SCALE} cy={y * SCALE + 3} r={22} fill="rgba(0,0,0,0.4)" />
-            <circle cx={x * SCALE} cy={y * SCALE} r={22}
-              fill={seatColor(summary, terr.owner)}
-              stroke={isSel ? '#ffffff' : '#0a0e24'}
-              strokeWidth={isSel ? 5 : 2}
-              opacity={view.eliminated.includes(terr.owner) ? 0.35 : 1}
-            />
-            <circle cx={x * SCALE - 7} cy={y * SCALE - 7} r={6} fill="rgba(255,255,255,0.3)" />
-            <text x={x * SCALE} y={y * SCALE + 7} textAnchor="middle" fontSize={20} fontWeight={900} fill="#0a0e24">
-              {terr.armies}
-            </text>
-            <text x={x * SCALE} y={y * SCALE + 42} textAnchor="middle" fontSize={13} fontWeight={700} fill="#8f97c4">
+            <g className={justConquered ? 'gb-pop' : undefined}>
+              <circle cx={x * SCALE} cy={y * SCALE} r={22}
+                fill={seatColor(summary, terr.owner)}
+                stroke={isSel ? '#ffffff' : '#0a0e24'}
+                strokeWidth={isSel ? 5 : 2}
+                opacity={view.eliminated.includes(terr.owner) ? 0.35 : 1}
+              />
+              <circle cx={x * SCALE} cy={y * SCALE} r={20.5} fill="url(#gb-shine) rgba(255,255,255,0.15)" style={{ pointerEvents: 'none' }} />
+              <circle cx={x * SCALE - 7} cy={y * SCALE - 7} r={6} fill="rgba(255,255,255,0.3)" />
+              <text x={x * SCALE} y={y * SCALE + 7} textAnchor="middle" fontSize={20} fontWeight={900} fill="#0a0e24">
+                {terr.armies}
+              </text>
+            </g>
+            <text x={x * SCALE} y={y * SCALE + 42} textAnchor="middle" fontSize={13} fontWeight={700} fill="#9aa3d8">
               {NICE[t]}
             </text>
           </g>
         );
       })}
+      {showBattle && battle && (
+        <g style={{ pointerEvents: 'none' }}>
+          <CaptureBlast
+            x={POS[battle.to]![0] * SCALE}
+            y={POS[battle.to]![1] * SCALE}
+            color={battle.conquered ? seatColor(summary, view.territories[battle.to]!.owner) : '#ff5470'}
+            r={battle.conquered ? 30 : 22}
+          />
+          <text
+            x={(POS[battle.from]![0] + POS[battle.to]![0]) / 2 * SCALE}
+            y={(POS[battle.from]![1] + POS[battle.to]![1]) / 2 * SCALE + 8}
+            textAnchor="middle" fontSize={30} className="gb-boom">⚔️</text>
+          {battle.conquered && (
+            <RebirthPulse x={POS[battle.to]![0] * SCALE} y={POS[battle.to]![1] * SCALE}
+              color={seatColor(summary, view.territories[battle.to]!.owner)} r={28} />
+          )}
+        </g>
+      )}
+      <rect width={1000} height={720} rx={16} fill="url(#gb-vignette)" style={{ pointerEvents: 'none' }} />
     </svg>
   );
 }

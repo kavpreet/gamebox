@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { PandemicPublic, PandemicMove } from '@gamebox/game-pandemic';
 import { CITIES, type Disease } from '@gamebox/game-pandemic';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, WinnerBanner, Prompt, Waiting, EventLine, useBoardFit } from './common.js';
+import {
+  seatName, WinnerBanner, Prompt, Waiting, EventLine, useBoardFit,
+  useHandMove, HandGlyph, FxDefs, CaptureBlast, useRecentChange,
+} from './common.js';
 
 const DISEASE_HEX: Record<Disease, string> = {
   blue: '#45a6ff',
@@ -63,6 +66,35 @@ function Map({
     }
   }
 
+  // hand-drag the pawn that just moved between cities
+  const prevCitiesRef = useRef<Record<number, string> | null>(null);
+  // dummy initial value: useHandMove skips its first key, so the first real move animates
+  const [moved, setMoved] = useState<{ seat: number; from: string; to: string }>({ seat: -1, from: 'atlanta', to: 'atlanta' });
+  useEffect(() => {
+    const cur: Record<number, string> = {};
+    for (const s of view.order) cur[s] = view.players[s]!.city;
+    const prev = prevCitiesRef.current;
+    prevCitiesRef.current = cur;
+    if (!prev) return;
+    for (const s of view.order) {
+      if (prev[s] && prev[s] !== cur[s]) {
+        setMoved({ seat: s, from: prev[s]!, to: cur[s]! });
+        return;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view.order.map((s) => view.players[s]!.city).join(',')]);
+  const pawnSlide = useHandMove(
+    `${moved.seat}-${moved.from}-${moved.to}`,
+    { x: POS[moved.from]![0] * 10, y: POS[moved.from]![1] * 10 + 16 },
+    { x: POS[moved.to]![0] * 10, y: POS[moved.to]![1] * 10 + 16 },
+    600,
+  );
+
+  // "OUTBREAK in <city>!" → explosion on that city
+  const outbreakCity = view.lastEvent?.match(/^OUTBREAK in (.+)!$/)?.[1] ?? null;
+  const showOutbreak = useRecentChange(outbreakCity ? `${view.outbreaks}-${outbreakCity}` : null, 1100);
+
   const fit = useBoardFit();
   return (
     <svg viewBox="0 0 1000 660" preserveAspectRatio={fit}
@@ -77,6 +109,7 @@ function Map({
           <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
         </filter>
       </defs>
+      <FxDefs />
       <rect width={1000} height={660} rx={14} fill="url(#pan-ocean)" />
       {edges}
       {Object.entries(POS).map(([c, [x, y]]) => {
@@ -115,16 +148,30 @@ function Map({
               ) : null,
             )}
             {/* pawns */}
-            {playersHere.map((s, i) => (
-              <g key={s}>
-                <circle cx={x * S - 12 + i * 10} cy={y * S + 16} r={5.5}
-                  fill={PAWN_COLORS[view.order.indexOf(s) % 4]} stroke="#0a0e24" strokeWidth={1.5} />
-              </g>
-            ))}
+            {playersHere
+              .filter((s) => !(pawnSlide && s === moved.seat))
+              .map((s, i) => (
+                <g key={s}>
+                  <circle cx={x * S - 12 + i * 10} cy={y * S + 16} r={5.5}
+                    fill={PAWN_COLORS[view.order.indexOf(s) % 4]} stroke="#0a0e24" strokeWidth={1.5} />
+                </g>
+              ))}
             <text x={x * S} y={y * S + 33} textAnchor="middle" fontSize={11.5} fontWeight={700} fill="#8f97c4">{NICE(c)}</text>
           </g>
         );
       })}
+      {pawnSlide && (
+        <g style={{ filter: 'drop-shadow(0 4px 5px rgba(0,0,0,0.55))', pointerEvents: 'none' }}>
+          <circle cx={pawnSlide.x} cy={pawnSlide.y} r={6.5}
+            fill={PAWN_COLORS[view.order.indexOf(moved.seat) % 4]} stroke="#0a0e24" strokeWidth={1.5} />
+          <HandGlyph x={pawnSlide.x} y={pawnSlide.y} phase={pawnSlide.phase} t={pawnSlide.t} size={26} />
+        </g>
+      )}
+      {showOutbreak && outbreakCity && POS[outbreakCity] && (
+        <CaptureBlast x={POS[outbreakCity][0] * S} y={POS[outbreakCity][1] * S}
+          color={DISEASE_HEX[CITIES[outbreakCity]!.color]} r={26} />
+      )}
+      <rect width={1000} height={660} rx={14} fill="url(#gb-vignette)" style={{ pointerEvents: 'none' }} />
     </svg>
   );
 }

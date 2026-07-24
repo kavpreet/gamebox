@@ -5,7 +5,10 @@ import {
 } from '@gamebox/game-catan';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
 import type { GameSummary } from '@gamebox/shared-types';
-import { seatName, seatColor, SeatDot, WinnerBanner, Prompt, Waiting, EventLine, useSlideAnim, useBoardFit } from './common.js';
+import {
+  seatName, seatColor, SeatDot, WinnerBanner, Prompt, Waiting, EventLine, useBoardFit,
+  useHandMove, HandGlyph, FxDefs,
+} from './common.js';
 
 type CatanView = CatanPublic & {
   yourResources: Record<Resource, number> | null;
@@ -85,11 +88,21 @@ function Board({
     return h ? px(hexCenter(h.q, h.r)) : null;
   };
   const robberMoveKey = prevRobber && prevRobber !== view.robber ? `${prevRobber}->${view.robber}` : null;
-  const robberSlide = useSlideAnim(
+  const robberSlide = useHandMove(
     robberMoveKey,
     prevRobber ? centerOfHex(prevRobber) : null,
     centerOfHex(view.robber),
+    650,
   );
+
+  // pop in buildings added after mount (skip the initial render/rehydrate)
+  const seenBuildings = React.useRef<Set<string> | null>(null);
+  const firstRender = seenBuildings.current === null;
+  if (seenBuildings.current === null) seenBuildings.current = new Set(Object.keys(view.buildings));
+  const isNewBuilding = (v: string) => !firstRender && !seenBuildings.current!.has(v);
+  React.useEffect(() => {
+    for (const v of Object.keys(view.buildings)) seenBuildings.current!.add(v);
+  }, [view.buildings]);
 
   const fit = useBoardFit();
   return (
@@ -107,6 +120,7 @@ function Board({
           </linearGradient>
         ))}
       </defs>
+      <FxDefs />
       <rect width={680} height={600} rx={16} fill="url(#catan-sea)" />
       {view.hexes.map((h) => {
         const key = hexKey(h.q, h.r);
@@ -147,6 +161,7 @@ function Board({
         <g style={{ pointerEvents: 'none' }}>
           <ellipse cx={robberSlide.x} cy={robberSlide.y + 40} rx={13} ry={6} fill="rgba(0,0,0,0.45)" />
           <text x={robberSlide.x} y={robberSlide.y + 42} textAnchor="middle" fontSize={24}>🦹</text>
+          <HandGlyph x={robberSlide.x} y={robberSlide.y + 30} phase={robberSlide.phase} t={robberSlide.t} size={34} />
         </g>
       )}
       {/* roads + buildable edges */}
@@ -172,14 +187,14 @@ function Board({
         const p = px(vertexXY(v));
         const bc = seatColor(summary, b.owner);
         return b.city ? (
-          <g key={v}>
+          <g key={v} className={isNewBuilding(v) ? 'gb-pop' : undefined}>
             <rect x={p.x - 10} y={p.y - 8} width={20} height={17} rx={3}
               fill={bc} stroke="#ffffff" strokeWidth={2} />
             <path d={`M ${p.x - 11} ${p.y - 8} L ${p.x} ${p.y - 17} L ${p.x + 11} ${p.y - 8} Z`}
               fill={bc} stroke="#ffffff" strokeWidth={2} />
           </g>
         ) : (
-          <circle key={v} cx={p.x} cy={p.y} r={9}
+          <circle key={v} cx={p.x} cy={p.y} r={9} className={isNewBuilding(v) ? 'gb-pop' : undefined}
             fill={bc} stroke="#ffffff" strokeWidth={2} />
         );
       })}
