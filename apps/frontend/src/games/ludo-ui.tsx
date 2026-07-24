@@ -406,8 +406,33 @@ function TvView({ state }: TvViewProps<LudoPublic>) {
   );
 }
 
+/** What tapping "move token i" will do — enough context to choose without the board. */
+function describeMove(view: LudoPublic, seat: number, token: number): { label: string; capture: boolean } {
+  const die = view.die ?? 0;
+  const p = view.tokens[seat]?.[token] ?? -1;
+  if (p === -1) return { label: `Token ${token + 1} — 🏁 leave the yard`, capture: false };
+  const dest = p + die;
+  if (dest === HOME) return { label: `Token ${token + 1} — 🏠 reach home!`, capture: false };
+  if (dest > 50) return { label: `Token ${token + 1} — climb the home column`, capture: false };
+  const destGlobal = globalSquare(view, seat, dest);
+  let capture = false;
+  if (destGlobal !== null && !SAFE_GLOBALS.has(destGlobal)) {
+    for (const other of view.order) {
+      if (other === seat) continue;
+      capture ||= (view.tokens[other] ?? []).some((op) => op >= 0 && op <= 50 && globalSquare(view, other, op) === destGlobal);
+    }
+  }
+  return { label: `Token ${token + 1} — ${p + 1} → ${dest + 1}${capture ? ' ⚔️ CAPTURE!' : ''}`, capture };
+}
+
+/**
+ * Phones are action-first: roll + big move buttons, so the drama plays out
+ * on the TV instead of everyone staring at their own board. The full board
+ * stays available behind a toggle.
+ */
 function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<LudoPublic, LudoMove>) {
   const view = state.view;
+  const [showBoard, setShowBoard] = useState(false);
   if (!view) return null;
   const myTurn = state.activeSeats.includes(yourSeat) && state.status === 'active';
   const legal = (state.legalMoves ?? []) as LudoMove[];
@@ -427,23 +452,37 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<LudoPublic,
           ) : (
             <>
               <div className="action-bar">{view.die !== null && <Die value={view.die} />}</div>
-              <Prompt>Tap a glowing token to move it</Prompt>
+              <Prompt>Pick a token — watch it move on the TV</Prompt>
+              {movable.map((token) => {
+                const d = describeMove(view, yourSeat, token);
+                return (
+                  <button key={token} className={d.capture ? 'gold' : 'secondary'} style={{ width: '100%' }}
+                    onClick={() => submitMove('MOVE', { token })}>
+                    {d.label}
+                  </button>
+                );
+              })}
             </>
           )
         ) : (
           <Waiting state={state} />
         )}
         <EventLine text={view.lastEvent} />
+        <button className="ghost" onClick={() => setShowBoard((s) => !s)}>
+          {showBoard ? 'Hide board' : 'Show board'}
+        </button>
       </div>
-      <div className="board-frame">
-        <Board
-          view={view}
-          summary={state.summary}
-          yourSeat={yourSeat}
-          movable={movable}
-          onMoveToken={(token) => submitMove('MOVE', { token })}
-        />
-      </div>
+      {showBoard && (
+        <div className="board-frame">
+          <Board
+            view={view}
+            summary={state.summary}
+            yourSeat={yourSeat}
+            movable={movable}
+            onMoveToken={(token) => submitMove('MOVE', { token })}
+          />
+        </div>
+      )}
     </div>
   );
 }

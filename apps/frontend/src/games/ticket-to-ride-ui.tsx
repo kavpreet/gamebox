@@ -273,7 +273,9 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<TtrView, Tt
   const view = state.view;
   const [keep, setKeep] = useState<number[]>([]);
   const [colorPick, setColorPick] = useState<{ route: string; colors: TrainColor[] } | null>(null);
+  const [showMap, setShowMap] = useState(false);
   if (!view) return null;
+  const mapDef = mapDefOf(view);
   const legal = (state.legalMoves ?? []) as TtrMove[];
   const myTurn = state.activeSeats.includes(yourSeat) && state.status === 'active';
   const offer = view.offer ?? null;
@@ -373,9 +375,34 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<TtrView, Tt
         <LogPanel view={view} summary={state.summary} limit={3} fontSize="0.85rem" />
       </div>
 
-      <div className="board-frame">
-        <TtrMap view={view} summary={state.summary} claimable={actionable ? claimable : undefined} onRoute={onRoute} />
-      </div>
+      {/* routes you can afford, as tappable rows — the map lives on the TV */}
+      {actionable && claimable.size > 0 && (
+        <div className="card">
+          <h3>Routes you can claim</h3>
+          {[...claimable].map((id) => {
+            const def = mapDef.routeById[id]!;
+            return (
+              <button key={id} className="secondary" style={{ width: '100%', textAlign: 'left' }}
+                onClick={() => onRoute(id)}>
+                <span style={{
+                  display: 'inline-block', width: 12, height: 12, borderRadius: 3, marginRight: 8,
+                  background: ROUTE_HEX[def.color], border: '1px solid rgba(0,0,0,0.4)', verticalAlign: -1,
+                }} />
+                {NICE(def.a)} → {NICE(def.b)} · {def.length} 🚃
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <button className="ghost" onClick={() => setShowMap((s) => !s)}>
+        {showMap ? 'Hide map' : 'Show map'}
+      </button>
+      {showMap && (
+        <div className="board-frame">
+          <TtrMap view={view} summary={state.summary} claimable={actionable ? claimable : undefined} onRoute={onRoute} />
+        </div>
+      )}
 
       <div className="card">
         <h3>Your hand</h3>
