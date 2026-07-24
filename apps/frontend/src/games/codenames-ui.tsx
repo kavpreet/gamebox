@@ -53,7 +53,8 @@ function Board({
         const clickable = Boolean(onGuess && !revealed);
         return (
           <div
-            key={i}
+            key={`${i}-${revealed ?? 'hidden'}`}
+            className={revealed ? 'gb-flip' : undefined}
             style={cardStyle(revealed, view.key ? view.key[i]! : null, clickable)}
             onClick={clickable ? () => onGuess!(i) : undefined}
           >

@@ -7,16 +7,18 @@ import { seatName, SeatDot, WinnerBanner, Prompt, Waiting } from './common.js';
 const TILE_COLORS = ['#4a7cf7', '#f5d547', '#e94560', '#2b2b35', '#3ec8c0'];
 const TILE_NAMES = ['blue', 'yellow', 'red', 'black', 'teal'];
 
-function Tile({ color, size = 24, dim, onClick, selected }: {
+function Tile({ color, size = 24, dim, onClick, selected, className }: {
   color: TileColor | 'first';
   size?: number;
   dim?: boolean;
   onClick?: () => void;
   selected?: boolean;
+  className?: string;
 }) {
   return (
     <div
       onClick={onClick}
+      className={className}
       style={{
         width: size,
         height: size,
@@ -79,7 +81,7 @@ function BoardView({ board, name, tileSize = 22, onLine, selectableLines }: {
                 {Array.from({ length: r + 1 }, (_, i) => {
                   const filled = i >= r + 1 - l.count;
                   return filled && l.color !== null
-                    ? <Tile key={i} color={l.color} size={tileSize} />
+                    ? <Tile key={i} color={l.color} size={tileSize} className="pop-in" />
                     : <div key={i} style={{ width: tileSize, height: tileSize, borderRadius: 5, border: '1px dashed #333a63' }} />;
                 })}
               </div>
@@ -91,7 +93,8 @@ function BoardView({ board, name, tileSize = 22, onLine, selectableLines }: {
           {Array.from({ length: 5 }, (_, r) => (
             <div key={r} style={{ display: 'flex', gap: 3, padding: 2 }}>
               {Array.from({ length: 5 }, (_, c) => (
-                <Tile key={c} color={wallColor(r, c)} size={tileSize} dim={!board.wall[r]![c]} />
+                <Tile key={`${c}-${board.wall[r]![c] ? 1 : 0}`} color={wallColor(r, c)} size={tileSize}
+                  dim={!board.wall[r]![c]} className={board.wall[r]![c] ? 'pop-in' : undefined} />
               ))}
             </div>
           ))}

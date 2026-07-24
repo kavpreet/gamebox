@@ -19,13 +19,14 @@ interface Pending {
   isBlank: boolean;
 }
 
-function Square({ cell, pending, row, col, size, highlight, onClick }: {
+function Square({ cell, pending, row, col, size, highlight, justPlaced, onClick }: {
   cell: BoardCell | null;
   pending?: Pending;
   row: number;
   col: number;
   size: number;
   highlight?: boolean;
+  justPlaced?: boolean;
   onClick?: () => void;
 }) {
   const prem = premiumAt(row, col);
@@ -56,7 +57,11 @@ function Square({ cell, pending, row, col, size, highlight, onClick }: {
         boxSizing: 'border-box',
       }}
     >
-      {letter ?? (row === CENTER && col === CENTER ? '★' : prem ? PREMIUM_LABEL[prem] : '')}
+      {letter ? (
+        <span className={justPlaced ? 'pop-in' : undefined}>{letter}</span>
+      ) : (
+        row === CENTER && col === CENTER ? '★' : prem ? PREMIUM_LABEL[prem] : ''
+      )}
     </div>
   );
 }
@@ -82,6 +87,7 @@ function Board({ view, pending = [], squareSize, onSquare }: {
               cell={view.board[r]![c] ?? null}
               pending={p}
               highlight={lastSet.has(`${r},${c}`)}
+              justPlaced={lastSet.has(`${r},${c}`)}
               onClick={onSquare && !view.board[r]![c] ? () => onSquare(r, c) : undefined}
             />
           );
