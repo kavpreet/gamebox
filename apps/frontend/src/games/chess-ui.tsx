@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { ChessPublic, ChessMove } from '@gamebox/game-chess';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { SeatTokens, WinnerBanner, Prompt, Waiting, useSlideAnim, useBoardFit } from './common.js';
+import { SeatTokens, WinnerBanner, Prompt, Waiting, useHandMove, HandGlyph, FxDefs, CaptureBlast, useRecentChange, useBoardFit } from './common.js';
 
 const PIECES: Record<string, string> = {
   wk: '♔', wq: '♕', wr: '♖', wb: '♗', wn: '♘', wp: '♙',
@@ -72,14 +72,18 @@ function Board({
   const moveKey = view.lastMove ? `${view.lastMove.from}-${view.lastMove.to}-${view.history.length}` : null;
   const slideFrom = view.lastMove ? squareXY(view.lastMove.from, flipped, C, M) : null;
   const slideTo = view.lastMove ? squareXY(view.lastMove.to, flipped, C, M) : null;
-  const slidePos = useSlideAnim(moveKey, slideFrom, slideTo);
+  const slidePos = useHandMove(moveKey, slideFrom, slideTo);
   const slidingPiece = slidePos && view.lastMove ? squares.find((s) => s.name === view.lastMove!.to)?.piece : null;
+  // SAN with an 'x' = a capture — blast the landing square as the piece arrives
+  const isCapture = view.history[view.history.length - 1]?.includes('x') ?? false;
+  const showBlast = useRecentChange(isCapture ? moveKey : null, 900, 660);
 
   const fit = useBoardFit();
   return (
     <svg viewBox={`0 0 ${W} ${W}`} preserveAspectRatio={fit}
       style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}>
-      <rect width={W} height={W} rx={10} fill="#241a12" />
+      <FxDefs />
+      <rect width={W} height={W} rx={10} fill="#2e2115" />
       {Array.from({ length: 8 }, (_, i) => {
         const fileCh = String.fromCharCode(97 + (flipped ? 7 - i : i));
         const rankCh = String(flipped ? i + 1 : 8 - i);
@@ -100,7 +104,7 @@ function Board({
         return (
           <g key={s.name} onClick={onSquare ? () => onSquare(s.name) : undefined} style={onSquare ? { cursor: 'pointer' } : undefined}>
             <rect x={x} y={y} width={C} height={C}
-              fill={light ? '#e8d3ae' : '#9d6b43'} />
+              fill={light ? '#f2debb' : '#b0754a'} />
             {isLast && <rect x={x} y={y} width={C} height={C} fill="rgba(255,185,48,0.4)" />}
             {isSel && <rect x={x} y={y} width={C} height={C} fill="rgba(255,185,48,0.65)" />}
             {isTarget && <circle cx={x + C / 2} cy={y + C / 2} r={s.piece ? C * 0.44 : C * 0.15}
@@ -116,13 +120,20 @@ function Board({
           </g>
         );
       })}
+      <rect x={M} y={M} width={8 * C} height={8 * C} fill="url(#gb-boardlight)" style={{ pointerEvents: 'none' }} />
+      {showBlast && slideTo && (
+        <CaptureBlast x={slideTo.x} y={slideTo.y} color="#ff9d3c" r={C * 0.42} />
+      )}
       {slidePos && slidingPiece && (
-        <text x={slidePos.x} y={slidePos.y + C * 0.24} textAnchor="middle" fontSize={C * 0.76}
-          fill={slidingPiece[0] === 'w' ? '#fdfdf8' : '#1c1512'}
-          stroke={slidingPiece[0] === 'w' ? '#3a2c20' : '#00000055'} strokeWidth={1}
-          style={{ filter: 'drop-shadow(0 3px 3px rgba(0,0,0,0.5))', pointerEvents: 'none' }}>
-          {PIECES[slidingPiece]}
-        </text>
+        <g style={{ pointerEvents: 'none' }}>
+          <text x={slidePos.x} y={slidePos.y + C * 0.24} textAnchor="middle" fontSize={C * 0.76}
+            fill={slidingPiece[0] === 'w' ? '#fdfdf8' : '#1c1512'}
+            stroke={slidingPiece[0] === 'w' ? '#3a2c20' : '#00000055'} strokeWidth={1}
+            style={{ filter: 'drop-shadow(0 3px 3px rgba(0,0,0,0.5))' }}>
+            {PIECES[slidingPiece]}
+          </text>
+          <HandGlyph x={slidePos.x} y={slidePos.y} phase={slidePos.phase} t={slidePos.t} size={C * 0.95} />
+        </g>
       )}
     </svg>
   );
