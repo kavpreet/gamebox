@@ -432,6 +432,36 @@ input:focus, select:focus {
 }
 .game-tile.selected .name { color: var(--text); }
 
+/* ── TV root + light theme ─────────────────────────────────────
+   TVs default to a bright living-room look; boards keep their own
+   colors and read as framed boards on the light wall. */
+.tv-root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.tv-root.theme-light {
+  --bg-card: rgba(255, 255, 255, 0.82);
+  --bg-card-solid: #ffffff;
+  --bg-raised: #e7ebfa;
+  --line: rgba(35, 45, 95, 0.14);
+  --line-strong: rgba(35, 45, 95, 0.3);
+  --text: #232848;
+  --text-dim: #5d6488;
+  --shadow: 0 10px 30px rgba(35, 45, 95, 0.16);
+  color: var(--text);
+  background:
+    radial-gradient(1100px 600px at 85% -10%, rgba(139, 108, 255, 0.12), transparent 60%),
+    radial-gradient(900px 550px at -10% 15%, rgba(255, 77, 109, 0.09), transparent 55%),
+    radial-gradient(800px 700px at 55% 115%, rgba(46, 230, 201, 0.10), transparent 55%),
+    #eef1fb;
+}
+.tv-root.theme-light .tv-header { background: rgba(255, 255, 255, 0.7); }
+.tv-root.theme-light .pin-display { text-shadow: 0 2px 18px rgba(245, 152, 29, 0.35); }
+.tv-root.theme-light button.secondary { background: #dde2f6; color: var(--text); }
+.tv-root.theme-light button.ghost { color: var(--text-dim); }
+.tv-root.theme-light button.ghost:hover { color: var(--text); background: rgba(35, 45, 95, 0.08); }
+
 /* ── TV screen ─────────────────────────────────────────────── */
 /* Hard-capped to the viewport: a TV never scrolls — boards letterbox
    into the available height instead. */

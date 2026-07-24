@@ -9,9 +9,16 @@ import { SeatTokens, SeatDot, WinnerBanner, TvFitContext, type TvFit } from '../
 import { api, type GameTypeInfo } from '../api.js';
 
 const FIT_STORAGE_KEY = 'gamebox-tv-fit';
+const THEME_STORAGE_KEY = 'gamebox-tv-theme';
 
 function loadFit(): TvFit {
   return window.localStorage.getItem(FIT_STORAGE_KEY) === 'stretch' ? 'stretch' : 'fit';
+}
+
+type TvTheme = 'light' | 'dark';
+
+function loadTheme(): TvTheme {
+  return window.localStorage.getItem(THEME_STORAGE_KEY) === 'dark' ? 'dark' : 'light';
 }
 
 /**
@@ -27,11 +34,20 @@ export function TvPage() {
   const [qr, setQr] = useState('');
   const [types, setTypes] = useState<GameTypeInfo[]>([]);
   const [fit, setFit] = useState<TvFit>(loadFit);
+  const [theme, setTheme] = useState<TvTheme>(loadTheme);
 
   const setAndStoreFit = (f: TvFit) => {
     setFit(f);
     window.localStorage.setItem(FIT_STORAGE_KEY, f);
   };
+
+  const toggleTheme = () => {
+    const t: TvTheme = theme === 'light' ? 'dark' : 'light';
+    setTheme(t);
+    window.localStorage.setItem(THEME_STORAGE_KEY, t);
+  };
+
+  const shellClass = `tv-root${theme === 'light' ? ' theme-light' : ''}`;
 
   useEffect(() => {
     api.gameTypes().then(setTypes).catch(() => {});
@@ -79,6 +95,7 @@ export function TvPage() {
 
   if (!state || state.status === 'abandoned') {
     return (
+      <div className={shellClass}>
       <div className="idle-screen">
         <h1 className="wordmark">GameBox</h1>
         <p style={{ fontSize: '2.5vmin' }} className="dim">
@@ -89,6 +106,7 @@ export function TvPage() {
           room code: {roomCode}
         </p>
       </div>
+      </div>
     );
   }
 
@@ -96,6 +114,7 @@ export function TvPage() {
   if (state.status === 'lobby') {
     const typeInfo = types.find((t) => t.slug === state.summary.gameType);
     return (
+      <div className={shellClass}>
       <div className="idle-screen">
         <h1 className="wordmark" style={{ fontSize: '4.5vmin' }}>{typeInfo?.displayName ?? state.summary.gameType}</h1>
         {typeInfo?.description && (
@@ -115,12 +134,14 @@ export function TvPage() {
           ))}
         </div>
       </div>
+      </div>
     );
   }
 
   const ui = getGameUi(state.summary.gameType);
   return (
     <TvFitContext.Provider value={fit}>
+      <div className={shellClass}>
       <div className="tv-screen">
         <div className="tv-header">
           <span className="logo">
@@ -147,6 +168,14 @@ export function TvPage() {
                 Stretch
               </button>
             </span>
+            <button
+              className="ghost"
+              style={{ padding: '0.3em 0.7em', fontSize: '1.6vmin' }}
+              onClick={toggleTheme}
+              title="Toggle light/dark theme"
+            >
+              {theme === 'light' ? '🌙' : '☀️'}
+            </button>
           </span>
         </div>
         {ui ? (
@@ -160,6 +189,7 @@ export function TvPage() {
             </div>
           </div>
         )}
+      </div>
       </div>
     </TvFitContext.Provider>
   );
