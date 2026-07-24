@@ -66,8 +66,13 @@ export const SEAT_ICON_PALETTE = [
   '🐯', '🐼', '🐧', '🦄', '🐲', '🦖', '👑', '⭐', '🔥', '⚡',
 ] as const;
 
+/** The first 6 palette entries double as the default (uncustomized) seat colors. */
+export function defaultSeatColor(seat: number): string {
+  return SEAT_COLOR_PALETTE[seat % 6]!;
+}
+
 export function isValidSeatColor(c: string): boolean {
-  return c === 'transparent' || (SEAT_COLOR_PALETTE as readonly string[]).includes(c);
+  return (SEAT_COLOR_PALETTE as readonly string[]).includes(c);
 }
 
 export function isValidSeatIcon(i: string): boolean {

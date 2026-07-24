@@ -11,7 +11,8 @@ import type { LiveState } from './types.js';
  */
 export function seatColor(summary: GameSummary, seat: Seat): string {
   const p = summary.players.find((pl) => pl.seat === seat);
-  if (p?.color) return p.color;
+  // 'transparent' is a legacy value from before it was removed as an option
+  if (p?.color && p.color !== 'transparent') return p.color;
   return SEAT_HEX[seat % SEAT_HEX.length]!;
 }
 
@@ -20,23 +21,16 @@ export function seatIcon(summary: GameSummary, seat: Seat): string | null {
   return summary.players.find((pl) => pl.seat === seat)?.icon ?? null;
 }
 
-export function seatIsTransparent(summary: GameSummary, seat: Seat): boolean {
-  return summary.players.find((pl) => pl.seat === seat)?.color === 'transparent';
-}
-
 /** A player's token, everywhere it appears as a small DOM dot (chips, lists). */
 export function SeatDot({ summary, seat, size }: { summary: GameSummary; seat: Seat; size?: number }) {
   const color = seatColor(summary, seat);
   const icon = seatIcon(summary, seat);
-  const transparent = color === 'transparent';
   return (
     <span
       className="token"
       style={{
-        background: transparent ? 'transparent' : color,
-        boxShadow: transparent
-          ? 'inset 0 0 0 2px rgba(255,255,255,0.7)'
-          : 'inset 0 -2px 3px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.4)',
+        background: color,
+        boxShadow: 'inset 0 -2px 3px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.4)',
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -49,31 +43,26 @@ export function SeatDot({ summary, seat, size }: { summary: GameSummary; seat: S
   );
 }
 
-/** SVG counterpart of SeatDot — a circle (or ring, if transparent) plus centered icon glyph. */
-export function SeatToken({ summary, seat, cx, cy, r, ringOnly }: {
+/** SVG counterpart of SeatDot — a domed circle plus centered icon glyph. */
+export function SeatToken({ summary, seat, cx, cy, r }: {
   summary: GameSummary;
   seat: Seat;
   cx: number;
   cy: number;
   r: number;
-  /** force a stroke-only ring even for opaque colors (e.g. highlighted state) */
-  ringOnly?: boolean;
 }) {
   const color = seatColor(summary, seat);
   const icon = seatIcon(summary, seat);
-  const transparent = ringOnly || color === 'transparent';
   return (
     <g>
-      {!transparent && <ellipse cx={cx} cy={cy + r * 0.28} rx={r * 1.05} ry={r * 0.85} fill="rgba(0,0,0,0.4)" />}
+      <ellipse cx={cx} cy={cy + r * 0.28} rx={r * 1.05} ry={r * 0.85} fill="rgba(0,0,0,0.4)" />
       <circle cx={cx} cy={cy} r={r}
-        fill={transparent ? 'none' : color}
-        stroke={transparent ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.55)'}
-        strokeWidth={transparent ? Math.max(2, r * 0.22) : Math.max(1.5, r * 0.12)} />
-      {!transparent && (
-        // domed top-light; falls back to a plain sheen if the board has no FxDefs
-        <circle cx={cx} cy={cy} r={r * 0.94} fill="url(#gb-shine) rgba(255,255,255,0.18)" style={{ pointerEvents: 'none' }} />
-      )}
-      {!transparent && <circle cx={cx - r * 0.3} cy={cy - r * 0.32} r={r * 0.24} fill="rgba(255,255,255,0.45)" />}
+        fill={color}
+        stroke="rgba(255,255,255,0.55)"
+        strokeWidth={Math.max(1.5, r * 0.12)} />
+      {/* domed top-light; falls back to a plain sheen if the board has no FxDefs */}
+      <circle cx={cx} cy={cy} r={r * 0.94} fill="url(#gb-shine) rgba(255,255,255,0.18)" style={{ pointerEvents: 'none' }} />
+      <circle cx={cx - r * 0.3} cy={cy - r * 0.32} r={r * 0.24} fill="rgba(255,255,255,0.45)" />
       {icon && (
         <text x={cx} y={cy + r * 0.35} textAnchor="middle" fontSize={r * 1.3} style={{ pointerEvents: 'none' }}>
           {icon}

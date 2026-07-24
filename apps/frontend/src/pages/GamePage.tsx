@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import QRCode from 'qrcode';
 import type { RoomDTO, Seat, DisconnectOption } from '@gamebox/shared-types';
-import { SEAT_COLOR_PALETTE, SEAT_ICON_PALETTE } from '@gamebox/shared-types';
+import { SEAT_COLOR_PALETTE, SEAT_ICON_PALETTE, defaultSeatColor } from '@gamebox/shared-types';
 import { useSession } from '../auth-client.js';
 import { api, type GameTypeInfo } from '../api.js';
 import { getSocket, emitAck } from '../socket.js';
@@ -264,7 +264,9 @@ function Lobby({ state, isHost, yourSeat }: { state: LiveState; isHost: boolean;
   const teamsAllowed = typeInfo && typeInfo.teams !== 'none';
 
   const me = summary.players.find((p) => p.seat === yourSeat) ?? null;
-  const takenColors = new Set(summary.players.filter((p) => p.seat !== yourSeat && p.color && p.color !== 'transparent').map((p) => p.color));
+  const takenColors = new Set(
+    summary.players.filter((p) => p.seat !== yourSeat).map((p) => p.color ?? defaultSeatColor(p.seat)),
+  );
   const takenIcons = new Set(summary.players.filter((p) => p.seat !== yourSeat && p.icon).map((p) => p.icon));
 
   const setAppearance = async (color: string | null, icon: string | null) => {
@@ -322,30 +324,23 @@ function Lobby({ state, isHost, yourSeat }: { state: LiveState; isHost: boolean;
       {pickerOpen && me && (
         <div className="card">
           <h3>Your look</h3>
-          <p className="dim small">
-            {me.icon === null
-              ? 'No icon: your color must be solid. Pick an icon to unlock a transparent background.'
-              : 'Colors and icons must be unique — taken ones are dimmed.'}
-          </p>
+          <p className="dim small">Colors and icons must be unique — taken ones are dimmed.</p>
           <p className="dim small" style={{ marginTop: -6 }}>Color</p>
           <div className="row" style={{ gap: 8 }}>
-            {[...SEAT_COLOR_PALETTE, 'transparent'].map((c) => {
-              const taken = takenColors.has(c) && c !== 'transparent';
-              const disabled = taken || (c === 'transparent' && me.icon === null);
+            {SEAT_COLOR_PALETTE.map((c) => {
+              const taken = takenColors.has(c);
               return (
                 <div
                   key={c}
-                  onClick={disabled ? undefined : () => setAppearance(c, me.icon)}
-                  title={c === 'transparent' ? 'Transparent (needs an icon)' : c}
+                  onClick={taken ? undefined : () => setAppearance(c, me.icon)}
+                  title={c}
                   style={{
                     width: 30, height: 30, borderRadius: '50%',
-                    background: c === 'transparent' ? 'transparent' : c,
-                    boxShadow: c === 'transparent'
-                      ? 'inset 0 0 0 2px rgba(255,255,255,0.7)'
-                      : 'inset 0 -2px 3px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.4)',
+                    background: c,
+                    boxShadow: 'inset 0 -2px 3px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.4)',
                     border: me.color === c ? '3px solid var(--gold)' : '2px solid transparent',
-                    cursor: disabled ? 'not-allowed' : 'pointer',
-                    opacity: disabled ? 0.25 : 1,
+                    cursor: taken ? 'not-allowed' : 'pointer',
+                    opacity: taken ? 0.25 : 1,
                   }}
                 />
               );
@@ -355,7 +350,7 @@ function Lobby({ state, isHost, yourSeat }: { state: LiveState; isHost: boolean;
           <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
             <button
               className={me.icon === null ? '' : 'secondary'}
-              onClick={() => setAppearance(me.color === 'transparent' ? null : me.color, null)}
+              onClick={() => setAppearance(me.color, null)}
             >
               No icon
             </button>

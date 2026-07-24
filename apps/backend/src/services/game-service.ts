@@ -7,6 +7,7 @@ import {
   type RuntimeSnapshot,
 } from '@gamebox/core-engine';
 import {
+  defaultSeatColor,
   isValidSeatColor,
   isValidSeatIcon,
   type GameStatus,
@@ -164,10 +165,8 @@ export class GameService {
 
   /**
    * Each player picks their own look. Rules (enforced here, not just in the
-   * UI, since the UI can't be trusted): every non-transparent color must be
-   * unique among this game's seats; every non-null icon must be unique;
-   * a plain-color (no icon) player may not be transparent — the board would
-   * render an invisible piece.
+   * UI, since the UI can't be trusted): every non-null color must be unique
+   * among this game's seats; every non-null icon must be unique.
    */
   async setAppearance(
     gameId: string,
@@ -179,16 +178,16 @@ export class GameService {
     if (game.status !== 'lobby') throw new GameServiceError('Can only customize before the game starts', 'CONFLICT');
     if (color !== null && !isValidSeatColor(color)) throw new GameServiceError('Unknown color', 'BAD_REQUEST');
     if (icon !== null && !isValidSeatIcon(icon)) throw new GameServiceError('Unknown icon', 'BAD_REQUEST');
-    if (color === 'transparent' && icon === null) {
-      throw new GameServiceError('Pick an icon to use a transparent background', 'BAD_REQUEST');
-    }
 
     const players = await this.playersOf(gameId);
     const me = players.find((p) => p.user_id === userId);
     if (!me) throw new GameServiceError('You are not in this game', 'FORBIDDEN');
 
-    if (color !== null && color !== 'transparent') {
-      const clash = players.some((p) => p.seat_index !== me.seat_index && p.color === color);
+    if (color !== null) {
+      // clash against picked colors AND the default color of anyone who hasn't picked
+      const clash = players.some(
+        (p) => p.seat_index !== me.seat_index && (p.color ?? defaultSeatColor(p.seat_index)) === color,
+      );
       if (clash) throw new GameServiceError('Another player already has that color', 'CONFLICT');
     }
     if (icon !== null) {
