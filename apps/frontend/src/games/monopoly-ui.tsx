@@ -130,6 +130,22 @@ function useMonopolyAnim(view: MonopolyPublic, C: number): { anim: MonoAnim | nu
   return { anim, jailFx };
 }
 
+/** Break a space name into at most two short lines that fit a cell. */
+function splitName(name: string): string[] {
+  if (name.length <= 10) return [name];
+  const words = name.split(' ');
+  if (words.length === 1) return [name.length > 11 ? name.slice(0, 10) + '…' : name];
+  let l1 = words[0]!;
+  let i = 1;
+  while (i < words.length && (l1 + ' ' + words[i]!).length <= 10) {
+    l1 += ' ' + words[i]!;
+    i++;
+  }
+  let l2 = words.slice(i).join(' ');
+  if (l2.length > 11) l2 = l2.slice(0, 10) + '…';
+  return l2 ? [l1, l2] : [l1];
+}
+
 function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }) {
   const C = 62;
   const { anim, jailFx } = useMonopolyAnim(view, C);
@@ -141,59 +157,90 @@ function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }
     const prop = view.properties[pos];
     const groupColor = sp.group ? GROUP_HEX[sp.group] : null;
     const corner = CORNER_ART[sp.type];
-    // color band on the inner edge of the cell, facing the center
-    const band = groupColor && (
-      cy === 10 ? <rect x={x + 2} y={y} width={C - 4} height={11} rx={2} fill={groupColor} />
-      : cy === 0 ? <rect x={x + 2} y={y + C - 11} width={C - 4} height={11} rx={2} fill={groupColor} />
-      : cx === 0 ? <rect x={x + C - 11} y={y + 2} width={11} height={C - 4} rx={2} fill={groupColor} />
-      : <rect x={x} y={y + 2} width={11} height={C - 4} rx={2} fill={groupColor} />
-    );
+    // which cell edge the color band sits on (inner edge, facing the center)
+    const bandEdge = !groupColor ? null : cy === 10 ? 'top' : cy === 0 ? 'bottom' : cx === 0 ? 'right' : 'left';
+    const band =
+      bandEdge === 'top' ? <rect x={x + 2} y={y + 2} width={C - 4} height={12} rx={2} fill={groupColor!} stroke="rgba(0,0,0,0.25)" />
+      : bandEdge === 'bottom' ? <rect x={x + 2} y={y + C - 14} width={C - 4} height={12} rx={2} fill={groupColor!} stroke="rgba(0,0,0,0.25)" />
+      : bandEdge === 'right' ? <rect x={x + C - 14} y={y + 2} width={12} height={C - 4} rx={2} fill={groupColor!} stroke="rgba(0,0,0,0.25)" />
+      : bandEdge === 'left' ? <rect x={x + 2} y={y + 2} width={12} height={C - 4} rx={2} fill={groupColor!} stroke="rgba(0,0,0,0.25)" />
+      : null;
+
+    // content area (the part of the cell not covered by the band)
+    const ctX = x + C / 2 + (bandEdge === 'left' ? 6 : bandEdge === 'right' ? -6 : 0);
+    const ctY = bandEdge === 'top' ? y + 13 : y;
+    const nameLines = splitName(sp.name);
+
+    // owner marker goes in the corner farthest from the band; double ring
+    // (white + dark) keeps it readable on any cell or band color
+    const ownX = bandEdge === 'left' ? x + C - 9 : x + 9;
+    const ownY = bandEdge === 'top' ? y + C - 9 : bandEdge === 'bottom' ? y + 9 : y + C - 9;
+
+    // houses sit on the color band, classic-style
+    const housePips: React.ReactElement[] = [];
+    if (prop && prop.houses > 0 && bandEdge) {
+      const horiz = bandEdge === 'top' || bandEdge === 'bottom';
+      const bandCx = horiz ? 0 : bandEdge === 'left' ? x + 8 : x + C - 8;
+      const bandCy = horiz ? (bandEdge === 'top' ? y + 8 : y + C - 8) : 0;
+      if (prop.houses === 5) {
+        housePips.push(
+          horiz
+            ? <rect key="h" x={x + C / 2 - 7} y={bandCy - 4.5} width={14} height={9} rx={2} fill="#e23f44" stroke="#ffffff" strokeWidth={1.2} />
+            : <rect key="h" x={bandCx - 4.5} y={y + C / 2 - 7} width={9} height={14} rx={2} fill="#e23f44" stroke="#ffffff" strokeWidth={1.2} />,
+        );
+      } else {
+        for (let i = 0; i < prop.houses; i++) {
+          const off = (i - (prop.houses - 1) / 2) * 11;
+          housePips.push(
+            <rect key={i}
+              x={(horiz ? x + C / 2 + off : bandCx) - 3.75}
+              y={(horiz ? bandCy : y + C / 2 + off) - 3.75}
+              width={7.5} height={7.5} rx={1.5} fill="#2f9e44" stroke="#ffffff" strokeWidth={1.2} />,
+          );
+        }
+      }
+    }
+
     cells.push(
       <g key={pos}>
-        <rect x={x + 1} y={y + 1} width={C - 2} height={C - 2} rx={4}
-          fill={corner ? '#2a325c' : '#212850'} stroke="rgba(0,0,0,0.45)" strokeWidth={1.2} />
-        <rect x={x + 2} y={y + 2} width={C - 4} height={C - 4} rx={3}
-          fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={1} />
+        <rect x={x + 1} y={y + 1} width={C - 2} height={C - 2} rx={3}
+          fill={corner ? '#ece4cc' : '#f4eedb'} stroke="#23283f" strokeWidth={1.4} />
         {band}
         {corner ? (
           <>
-            <text x={x + C / 2} y={y + C / 2 + 2} textAnchor="middle" fontSize={20}>{corner.emoji}</text>
-            <text x={x + C / 2} y={y + C - 8} textAnchor="middle" fontSize={8.5} fontWeight={900}
-              fill="#c9cdea" letterSpacing={0.5}>{corner.label}</text>
+            <text x={x + C / 2} y={y + C / 2 + 4} textAnchor="middle" fontSize={22}>{corner.emoji}</text>
+            <text x={x + C / 2} y={y + C - 7} textAnchor="middle" fontSize={8.5} fontWeight={900}
+              fill="#3b4160" letterSpacing={0.5}>{corner.label}</text>
           </>
         ) : (
           <>
+            {nameLines.map((ln, i) => (
+              <text key={i} x={ctX} y={ctY + 12 + i * 9} textAnchor="middle"
+                fontSize={7.6} fontWeight={800} fill="#2b2f45">
+                {ln}
+              </text>
+            ))}
             {TYPE_EMOJI[sp.type] && (
-              <text x={x + C / 2} y={y + C / 2 + 10} textAnchor="middle" fontSize={15} opacity={0.9}>
+              <text x={ctX} y={ctY + 36} textAnchor="middle" fontSize={14} opacity={0.95}>
                 {TYPE_EMOJI[sp.type]}
               </text>
             )}
-            <text x={x + C / 2} y={y + (groupColor && cy === 10 ? 24 : 20)} textAnchor="middle"
-              fontSize={sp.name.length > 14 ? 6.8 : 8} fontWeight={700} fill="#aab0d6">
-              {sp.name.length > 20 ? sp.name.slice(0, 18) + '…' : sp.name}
-            </text>
             {sp.price !== undefined && !prop && (
-              <text x={x + C / 2} y={y + C - 15} textAnchor="middle" fontSize={8} fill="#69709c" fontWeight={700}>
+              <text x={ctX} y={ctY + 47} textAnchor="middle" fontSize={8} fill="#6b7090" fontWeight={800}>
                 ${sp.price}
               </text>
             )}
           </>
         )}
+        {housePips}
         {prop && (
-          <rect x={x + 4} y={y + C - 9} width={C - 8} height={5.5} rx={2.5}
-            fill={seatColor(summary, prop.owner)} opacity={prop.mortgaged ? 0.3 : 1} />
-        )}
-        {prop && prop.houses > 0 && (
-          prop.houses === 5 ? (
-            <rect x={x + C - 20} y={y + 26} width={15} height={10} rx={2} fill="#e23f44" stroke="#0b0e1d" />
-          ) : (
-            <g>
-              {Array.from({ length: prop.houses }, (_, i) => (
-                <rect key={i} x={x + C - 13 - i * 11} y={y + 27} width={8.5} height={8.5} rx={1.5}
-                  fill="#7ed957" stroke="#0b0e1d" />
-              ))}
-            </g>
-          )
+          <g opacity={prop.mortgaged ? 0.55 : 1}>
+            <circle cx={ownX} cy={ownY} r={7} fill="#ffffff" />
+            <circle cx={ownX} cy={ownY} r={5.5} fill={seatColor(summary, prop.owner)} stroke="#23283f" strokeWidth={1.4} />
+            {prop.mortgaged && (
+              <line x1={ownX - 6} y1={ownY + 6} x2={ownX + 6} y2={ownY - 6} stroke="#c92a2a" strokeWidth={2.2} />
+            )}
+          </g>
         )}
       </g>,
     );
@@ -239,27 +286,27 @@ function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }
       style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}>
       <FxDefs />
       <defs>
-        <linearGradient id="mono-center" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#1d4441" />
-          <stop offset="100%" stopColor="#0f2826" />
-        </linearGradient>
-        <radialGradient id="mono-bg" cx="50%" cy="35%" r="90%">
-          <stop offset="0%" stopColor="#1b2150" />
-          <stop offset="100%" stopColor="#0e1230" />
+        <radialGradient id="mono-center" cx="50%" cy="42%" r="80%">
+          <stop offset="0%" stopColor="#d8ecd4" />
+          <stop offset="100%" stopColor="#bcd9b8" />
         </radialGradient>
       </defs>
-      <rect width={W} height={W} rx={14} fill="url(#mono-bg)" />
-      <rect x={C} y={C} width={9 * C} height={9 * C} rx={8} fill="url(#mono-center)" stroke="#2e6a63" strokeWidth={2} />
+      <rect width={W} height={W} rx={14} fill="#23283f" />
+      <rect x={C} y={C} width={9 * C} height={9 * C} rx={6} fill="url(#mono-center)" stroke="#23283f" strokeWidth={2} />
       {cells}
-      <text x={W / 2} y={4.35 * C} textAnchor="middle" fontSize={40} fontWeight={900}
-        fill="#e8b64c" letterSpacing={6} opacity={0.92} style={{ fontFamily: 'Nunito, sans-serif' }}>
-        MONOPOLY
-      </text>
+      <g transform={`rotate(-45 ${W / 2} ${W / 2})`}>
+        <rect x={W / 2 - 3.6 * C} y={W / 2 - 0.55 * C} width={7.2 * C} height={1.1 * C} rx={8}
+          fill="#e23f44" stroke="#ffffff" strokeWidth={3} />
+        <text x={W / 2} y={W / 2 + 13} textAnchor="middle" fontSize={40} fontWeight={900}
+          fill="#ffffff" letterSpacing={6} style={{ fontFamily: 'Nunito, sans-serif' }}>
+          MONOPOLY
+        </text>
+      </g>
       {view.lastRoll && (
         <g>
           {[view.lastRoll.d1, view.lastRoll.d2].map((d, i) => {
             const dx = W / 2 - 42 + i * 48;
-            const dy = 4.9 * C;
+            const dy = 6.55 * C;
             const pips: Record<number, [number, number][]> = {
               1: [[0.5, 0.5]], 2: [[0.25, 0.25], [0.75, 0.75]], 3: [[0.25, 0.25], [0.5, 0.5], [0.75, 0.75]],
               4: [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]],
@@ -278,15 +325,14 @@ function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }
         </g>
       )}
       {view.lastCard && (
-        <text x={W / 2} y={6.35 * C} textAnchor="middle" fontSize={15} fill="#ffb930" fontWeight={700}>
+        <text x={W / 2} y={7.9 * C} textAnchor="middle" fontSize={15} fill="#8a5200" fontWeight={800}>
           {view.lastCard}
         </text>
       )}
       {view.lastEvent && (
-        <text x={W / 2} y={6.9 * C} textAnchor="middle" fontSize={13.5} fill="#8fa0b8">{view.lastEvent}</text>
+        <text x={W / 2} y={8.35 * C} textAnchor="middle" fontSize={13.5} fill="#3b4160" fontWeight={600}>{view.lastEvent}</text>
       )}
       <rect width={W} height={W} rx={14} fill="url(#gb-boardlight)" style={{ pointerEvents: 'none' }} />
-      <rect width={W} height={W} rx={14} fill="url(#gb-vignette)" style={{ pointerEvents: 'none' }} />
       {tokens}
     </svg>
   );
