@@ -3,7 +3,10 @@ import type { GameSummary } from '@gamebox/shared-types';
 import type { SnlPublic } from '@gamebox/game-snakes-and-ladders';
 import { SNAKES, LADDERS } from '@gamebox/game-snakes-and-ladders';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, SeatDot, SeatToken, SeatTokens, WinnerBanner, Prompt, Waiting, Die, useBoardFit } from './common.js';
+import {
+  seatName, SeatDot, SeatToken, SeatTokens, WinnerBanner, Prompt, Waiting, Die, useBoardFit,
+  FxDefs, HandGlyph, CaptureBlast, RebirthPulse, type HandPhase,
+} from './common.js';
 
 const CELL = 60;
 const PAD = 8;
@@ -23,6 +26,14 @@ interface AnimState {
   seat: number;
   x: number;
   y: number;
+  phase: HandPhase | 'slide';
+  t: number;
+}
+
+interface SlideFx {
+  x: number;
+  y: number;
+  kind: 'snake' | 'ladder';
 }
 
 function easeInOutQuad(t: number): number {
@@ -30,76 +41,99 @@ function easeInOutQuad(t: number): number {
 }
 
 /**
- * Hops the just-moved token square by square, then — if it landed on a
- * snake or ladder — glides it smoothly to the slide's far end. Runs only
- * for the seat named in the newest `lastRoll`; every other token renders
- * at its authoritative resting square.
+ * A hand grabs the just-moved token, hops it square by square, and sets it
+ * down. If it landed on a snake the head "bites" (blast) and the token
+ * slides down without the hand; a ladder glides it up and sparkles at the
+ * top. Runs only for the seat in the newest `lastRoll`.
  */
-function useTokenAnimation(lastRoll: SnlPublic['lastRoll']): AnimState | null {
+function useTokenAnimation(lastRoll: SnlPublic['lastRoll']): { anim: AnimState | null; fx: SlideFx | null } {
   const [anim, setAnim] = useState<AnimState | null>(null);
+  const [fx, setFx] = useState<SlideFx | null>(null);
   const rollKey = useRef<string | null>(null);
 
   useEffect(() => {
     if (!lastRoll) return;
     const key = `${lastRoll.seat}:${lastRoll.from}:${lastRoll.to}:${lastRoll.die}:${lastRoll.slide ?? 'x'}`;
     if (rollKey.current === key) return;
+    const isFirst = rollKey.current === null;
     rollKey.current = key;
+    if (isFirst) return;
 
     let cancelled = false;
+    const timers: ReturnType<typeof setTimeout>[] = [];
     const seat = lastRoll.seat;
-    const hopSquares: number[] = [];
-    for (let sq = lastRoll.from + 1; sq <= lastRoll.to; sq++) hopSquares.push(sq);
-    if (hopSquares.length === 0) hopSquares.push(lastRoll.to);
-    let i = 0;
+    const GRAB = 200, HOP = 135, DROP = 240, PAUSE = 160, SLIDE = 600;
 
-    const finish = () => {
-      if (!cancelled) setTimeout(() => !cancelled && setAnim(null), 150);
-    };
+    const pts: { x: number; y: number }[] = [];
+    if (lastRoll.from > 0) pts.push(squareXY(lastRoll.from));
+    else {
+      const s1 = squareXY(1);
+      pts.push({ x: s1.x, y: s1.y + CELL * 0.9 });
+    }
+    for (let sq = lastRoll.from + 1; sq <= lastRoll.to; sq++) pts.push(squareXY(sq));
+    if (pts.length < 2) pts.push(squareXY(lastRoll.to));
 
-    const slide = (from: number, to: number) => {
-      const a = squareXY(from);
-      const b = squareXY(to);
-      const duration = 550;
-      const start = performance.now();
-      const frame = (now: number) => {
-        if (cancelled) return;
-        const t = Math.min(1, (now - start) / duration);
+    const moveMs = (pts.length - 1) * HOP;
+    const slide = lastRoll.slide;
+    const isSnake = slide !== null && slide < lastRoll.to;
+    const total = GRAB + moveMs + DROP + (slide !== null ? PAUSE + SLIDE : 0);
+    const landXY = squareXY(lastRoll.to);
+    const slideXY = slide !== null ? squareXY(slide) : null;
+    let fxFired = false;
+
+    const start = performance.now();
+    const frame = (now: number) => {
+      if (cancelled) return;
+      const el = now - start;
+      if (el >= total) {
+        if (slide !== null && !isSnake) {
+          // sparkle at the top of the ladder
+          setFx({ x: slideXY!.x, y: slideXY!.y, kind: 'ladder' });
+          timers.push(setTimeout(() => !cancelled && setFx(null), 900));
+        }
+        setAnim(null);
+        return;
+      }
+      if (el < GRAB) {
+        setAnim({ seat, ...pts[0]!, phase: 'grab', t: el / GRAB });
+      } else if (el < GRAB + moveMs) {
+        const k = (el - GRAB) / HOP;
+        const i = Math.min(Math.floor(k), pts.length - 2);
+        const e = easeInOutQuad(k - i);
+        const a = pts[i]!, b = pts[i + 1]!;
+        const lift = Math.sin((k - i) * Math.PI) * 6;
+        setAnim({ seat, x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e - lift, phase: 'drag', t: (el - GRAB) / moveMs });
+      } else if (el < GRAB + moveMs + DROP) {
+        setAnim({ seat, ...landXY, phase: 'drop', t: (el - GRAB - moveMs) / DROP });
+      } else if (el < GRAB + moveMs + DROP + PAUSE) {
+        if (isSnake && !fxFired) {
+          fxFired = true;
+          setFx({ x: landXY.x, y: landXY.y, kind: 'snake' });
+          timers.push(setTimeout(() => !cancelled && setFx(null), 900));
+        }
+        setAnim({ seat, ...landXY, phase: 'slide', t: 0 });
+      } else {
+        const t = (el - GRAB - moveMs - DROP - PAUSE) / SLIDE;
         const e = easeInOutQuad(t);
-        setAnim({ seat, x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e });
-        if (t < 1) requestAnimationFrame(frame);
-        else finish();
-      };
+        setAnim({ seat, x: landXY.x + (slideXY!.x - landXY.x) * e, y: landXY.y + (slideXY!.y - landXY.y) * e, phase: 'slide', t });
+      }
       requestAnimationFrame(frame);
     };
-
-    const hop = () => {
-      if (cancelled) return;
-      const sq = hopSquares[i]!;
-      const { x, y } = squareXY(sq);
-      setAnim({ seat, x, y });
-      i++;
-      if (i < hopSquares.length) {
-        setTimeout(hop, 130);
-      } else if (lastRoll.slide !== null) {
-        slide(lastRoll.to, lastRoll.slide);
-      } else {
-        finish();
-      }
-    };
-    hop();
+    requestAnimationFrame(frame);
 
     return () => {
       cancelled = true;
+      timers.forEach(clearTimeout);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastRoll?.seat, lastRoll?.from, lastRoll?.to, lastRoll?.die, lastRoll?.slide]);
 
-  return anim;
+  return { anim, fx };
 }
 
 function Board({ view, summary, size = '100%' }: { view: SnlPublic; summary: GameSummary; size?: string }) {
   const W = PAD * 2 + CELL * 10;
-  const anim = useTokenAnimation(view.lastRoll);
+  const { anim, fx } = useTokenAnimation(view.lastRoll);
   const cells = [];
   for (let sq = 1; sq <= 100; sq++) {
     const { x, y } = squareXY(sq);
@@ -112,10 +146,12 @@ function Board({ view, summary, size = '100%' }: { view: SnlPublic; summary: Gam
           y={y - CELL / 2}
           width={CELL}
           height={CELL}
-          fill={((Math.floor((sq - 1) / 10) + (sq - 1)) % 2 === 0) ? '#1c2244' : '#252c58'}
-          stroke="#333c68"
+          fill={((Math.floor((sq - 1) / 10) + (sq - 1)) % 2 === 0) ? '#20285a' : '#2c3570'}
+          stroke="rgba(0,0,0,0.4)"
           strokeWidth={1}
         />
+        <rect x={x - CELL / 2 + 1} y={y - CELL / 2 + 1} width={CELL - 2} height={CELL - 2}
+          fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={1} />
         <text x={x - CELL / 2 + 5} y={y - CELL / 2 + 15} fontSize={12} fill={isSnakeHead ? '#ff8098' : isLadderFoot ? '#69e0b0' : '#69709c'}>
           {sq}
         </text>
@@ -185,7 +221,21 @@ function Board({ view, summary, size = '100%' }: { view: SnlPublic; summary: Gam
     });
   }
   if (anim) {
-    tokens.push(<SeatToken key={`t${anim.seat}`} summary={summary} seat={anim.seat} cx={anim.x} cy={anim.y + 8} r={12} />);
+    tokens.push(
+      <g key={`t${anim.seat}`} style={{ filter: 'drop-shadow(0 5px 6px rgba(0,0,0,0.55))', pointerEvents: 'none' }}>
+        <SeatToken summary={summary} seat={anim.seat} cx={anim.x} cy={anim.y + 8} r={13} />
+        {anim.phase !== 'slide' && (
+          <HandGlyph x={anim.x} y={anim.y + 8} phase={anim.phase as HandPhase} t={anim.t} size={CELL * 0.72} />
+        )}
+      </g>,
+    );
+  }
+  if (fx) {
+    tokens.push(
+      fx.kind === 'snake'
+        ? <CaptureBlast key="fx" x={fx.x} y={fx.y} color="#7ed957" r={CELL * 0.4} />
+        : <RebirthPulse key="fx" x={fx.x} y={fx.y} color="#ffcf5c" r={CELL * 0.4} />,
+    );
   }
 
   // Start area tokens (position 0)
@@ -196,8 +246,18 @@ function Board({ view, summary, size = '100%' }: { view: SnlPublic; summary: Gam
     <svg viewBox={`0 0 ${W} ${W + (waiting.length ? 34 : 0)}`}
       preserveAspectRatio={fit}
       style={{ maxWidth: size, width: '100%', height: '100%', maxHeight: '100%' }}>
+      <FxDefs />
+      <defs>
+        <radialGradient id="snl-bg" cx="50%" cy="35%" r="90%">
+          <stop offset="0%" stopColor="#232b5e" />
+          <stop offset="100%" stopColor="#12163a" />
+        </radialGradient>
+      </defs>
+      <rect width={W} height={W} rx={10} fill="url(#snl-bg)" />
       {cells}
+      <rect width={W} height={W} rx={10} fill="url(#gb-boardlight)" style={{ pointerEvents: 'none' }} />
       {links}
+      <rect width={W} height={W} rx={10} fill="url(#gb-vignette)" style={{ pointerEvents: 'none' }} />
       {tokens}
       {waiting.map(([seatStr], i) => (
         <SeatToken key={`w${seatStr}`} summary={summary} seat={Number(seatStr)} cx={PAD + 14 + i * 30} cy={W + 14} r={11} />

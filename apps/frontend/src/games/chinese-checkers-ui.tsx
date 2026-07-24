@@ -3,7 +3,7 @@ import type { GameSummary } from '@gamebox/shared-types';
 import type { CCPublic, CCMove } from '@gamebox/game-chinese-checkers';
 import { allCells, destinations } from '@gamebox/game-chinese-checkers';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, SeatToken, SeatTokens, WinnerBanner, Prompt, Waiting, useSlideAnim, useBoardFit } from './common.js';
+import { seatName, SeatToken, SeatTokens, WinnerBanner, Prompt, Waiting, useHandMove, HandGlyph, FxDefs, useBoardFit } from './common.js';
 
 const R = 16; // hole radius in svg units
 const SP = 38; // spacing
@@ -37,7 +37,7 @@ function Board({
 }) {
   const lm = view.lastMove;
   const moveKey = lm ? `${lm.seat}-${lm.from}-${lm.to}` : null;
-  const slidePos = useSlideAnim(
+  const slidePos = useHandMove(
     moveKey,
     lm ? (({ px, py }) => ({ x: px, y: py }))(xy(lm.from)) : null,
     lm ? (({ px, py }) => ({ x: px, y: py }))(xy(lm.to)) : null,
@@ -49,13 +49,16 @@ function Board({
       preserveAspectRatio={fit}
       style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}
     >
+      <FxDefs />
       <defs>
-        <radialGradient id="cc-bg" cx="50%" cy="45%" r="75%">
-          <stop offset="0%" stopColor="#22284a" />
-          <stop offset="100%" stopColor="#121631" />
+        <radialGradient id="cc-bg" cx="50%" cy="42%" r="80%">
+          <stop offset="0%" stopColor="#2b3268" />
+          <stop offset="65%" stopColor="#1a2050" />
+          <stop offset="100%" stopColor="#101433" />
         </radialGradient>
       </defs>
-      <circle cx={0} cy={0} r={EXTENT * 0.98} fill="url(#cc-bg)" stroke="#333c68" strokeWidth={3} />
+      <circle cx={0} cy={0} r={EXTENT * 0.98} fill="url(#cc-bg)" stroke="#3d4680" strokeWidth={3} />
+      <circle cx={0} cy={0} r={EXTENT * 0.98} fill="url(#gb-vignette)" style={{ pointerEvents: 'none' }} />
       {CELLS.map((cell) => {
         const { px, py } = xy(cell);
         const owner = view.pegs[cell];
@@ -86,8 +89,9 @@ function Board({
         );
       })}
       {slidePos && lm && (
-        <g style={{ filter: 'drop-shadow(0 3px 4px rgba(0,0,0,0.5))', pointerEvents: 'none' }}>
+        <g style={{ filter: 'drop-shadow(0 4px 5px rgba(0,0,0,0.55))', pointerEvents: 'none' }}>
           <SeatToken summary={summary} seat={lm.seat} cx={slidePos.x} cy={slidePos.y} r={R} />
+          <HandGlyph x={slidePos.x} y={slidePos.y} phase={slidePos.phase} t={slidePos.t} size={R * 2.6} />
         </g>
       )}
     </svg>

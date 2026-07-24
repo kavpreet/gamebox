@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { MonopolyPublic, MonopolyMove } from '@gamebox/game-monopoly';
 import { BOARD, rentFor } from '@gamebox/game-monopoly';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
 import type { GameSummary } from '@gamebox/shared-types';
-import { seatName, seatColor, SeatDot, SeatToken, WinnerBanner, Prompt, Waiting, Die, EventLine, useBoardFit } from './common.js';
+import {
+  seatName, seatColor, SeatDot, SeatToken, WinnerBanner, Prompt, Waiting, Die, EventLine, useBoardFit,
+  FxDefs, HandGlyph, CaptureBlast, type HandPhase,
+} from './common.js';
 
 const GROUP_HEX: Record<string, string> = {
   brown: '#96603a', 'light-blue': '#7fd4f5', pink: '#e177c1', orange: '#f19b4c',
@@ -28,8 +31,108 @@ function cellOf(pos: number): [number, number] {
   return [10, pos - 30];
 }
 
+function easeInOutQuad(t: number): number {
+  return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+}
+
+/** first token slot inside a cell — where the hand sets the mover down */
+function tokenXY(pos: number, C: number): { x: number; y: number } {
+  const [cx, cy] = cellOf(pos);
+  return { x: cx * C + 13, y: cy * C + 42 };
+}
+
+interface MonoAnim {
+  seat: number;
+  x: number;
+  y: number;
+  phase: HandPhase;
+  t: number;
+}
+
+/**
+ * Diffs player positions between renders: normal rolls hop the token cell
+ * by cell around the ring under a hand; teleports (cards, go-to-jail) are a
+ * single glide, with a blast when you're slammed into jail.
+ */
+function useMonopolyAnim(view: MonopolyPublic, C: number): { anim: MonoAnim | null; jailFx: number | null } {
+  const [anim, setAnim] = useState<MonoAnim | null>(null);
+  const [jailFx, setJailFx] = useState<number | null>(null);
+  const prevRef = useRef<Record<number, number> | null>(null);
+
+  useEffect(() => {
+    const cur: Record<number, number> = {};
+    for (const s of view.order) cur[s] = view.players[s]!.position;
+    const prev = prevRef.current;
+    prevRef.current = cur;
+    if (!prev) return;
+
+    let mover: { seat: number; from: number; to: number } | null = null;
+    for (const s of view.order) {
+      if (prev[s] !== undefined && prev[s] !== cur[s] && !view.players[s]!.bankrupt) {
+        mover = { seat: s, from: prev[s]!, to: cur[s]! };
+        break;
+      }
+    }
+    if (!mover) return;
+
+    const { seat, from, to } = mover;
+    const steps = (to - from + 40) % 40;
+    const pts: { x: number; y: number }[] = [];
+    let segMs: number;
+    if (steps >= 1 && steps <= 12) {
+      for (let i = 0; i <= steps; i++) pts.push(tokenXY((from + i) % 40, C));
+      segMs = 120;
+    } else {
+      pts.push(tokenXY(from, C), tokenXY(to, C));
+      segMs = 520;
+    }
+    const slammedToJail = to === 10 && view.players[seat]!.inJail;
+
+    const GRAB = 200, DROP = 240;
+    const moveMs = (pts.length - 1) * segMs;
+    const total = GRAB + moveMs + DROP;
+    let cancelled = false;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const start = performance.now();
+    const frame = (now: number) => {
+      if (cancelled) return;
+      const el = now - start;
+      if (el >= total) {
+        setAnim(null);
+        if (slammedToJail) {
+          setJailFx(seat);
+          timers.push(setTimeout(() => !cancelled && setJailFx(null), 900));
+        }
+        return;
+      }
+      if (el < GRAB) {
+        setAnim({ seat, ...pts[0]!, phase: 'grab', t: el / GRAB });
+      } else if (el < GRAB + moveMs) {
+        const k = (el - GRAB) / segMs;
+        const i = Math.min(Math.floor(k), pts.length - 2);
+        const e = easeInOutQuad(k - i);
+        const a = pts[i]!, b = pts[i + 1]!;
+        const lift = Math.sin((k - i) * Math.PI) * (pts.length > 2 ? 5 : 10);
+        setAnim({ seat, x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e - lift, phase: 'drag', t: (el - GRAB) / moveMs });
+      } else {
+        setAnim({ seat, ...pts[pts.length - 1]!, phase: 'drop', t: (el - GRAB - moveMs) / DROP });
+      }
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+    return () => {
+      cancelled = true;
+      timers.forEach(clearTimeout);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view.order.map((s) => view.players[s]!.position).join(',')]);
+
+  return { anim, jailFx };
+}
+
 function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }) {
   const C = 62;
+  const { anim, jailFx } = useMonopolyAnim(view, C);
   const cells: React.ReactElement[] = [];
   BOARD.forEach((sp, pos) => {
     const [cx, cy] = cellOf(pos);
@@ -48,7 +151,9 @@ function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }
     cells.push(
       <g key={pos}>
         <rect x={x + 1} y={y + 1} width={C - 2} height={C - 2} rx={4}
-          fill={corner ? '#222948' : '#1b2140'} stroke="#333c68" strokeWidth={1.2} />
+          fill={corner ? '#2a325c' : '#212850'} stroke="rgba(0,0,0,0.45)" strokeWidth={1.2} />
+        <rect x={x + 2} y={y + 2} width={C - 4} height={C - 4} rx={3}
+          fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={1} />
         {band}
         {corner ? (
           <>
@@ -98,7 +203,7 @@ function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }
   const bySpace = new Map<number, number[]>();
   for (const s of view.order) {
     const p = view.players[s]!;
-    if (p.bankrupt) continue;
+    if (p.bankrupt || s === anim?.seat) continue;
     (bySpace.get(p.position) ?? bySpace.set(p.position, []).get(p.position)!).push(s);
   }
   const tokens: React.ReactElement[] = [];
@@ -114,20 +219,37 @@ function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }
       );
     });
   }
+  if (anim) {
+    tokens.push(
+      <g key={`anim${anim.seat}`} style={{ filter: 'drop-shadow(0 4px 5px rgba(0,0,0,0.55))', pointerEvents: 'none' }}>
+        <SeatToken summary={summary} seat={anim.seat} cx={anim.x} cy={anim.y} r={10} />
+        <HandGlyph x={anim.x} y={anim.y} phase={anim.phase} t={anim.t} size={C * 0.62} />
+      </g>,
+    );
+  }
+  if (jailFx !== null) {
+    const jail = tokenXY(10, C);
+    tokens.push(<CaptureBlast key="jailfx" x={jail.x} y={jail.y} color="#45a6ff" r={C * 0.38} />);
+  }
 
   const W = 11 * C;
   const fit = useBoardFit();
   return (
     <svg viewBox={`0 0 ${W} ${W}`} preserveAspectRatio={fit}
       style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}>
+      <FxDefs />
       <defs>
         <linearGradient id="mono-center" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#173230" />
-          <stop offset="100%" stopColor="#0f2422" />
+          <stop offset="0%" stopColor="#1d4441" />
+          <stop offset="100%" stopColor="#0f2826" />
         </linearGradient>
+        <radialGradient id="mono-bg" cx="50%" cy="35%" r="90%">
+          <stop offset="0%" stopColor="#1b2150" />
+          <stop offset="100%" stopColor="#0e1230" />
+        </radialGradient>
       </defs>
-      <rect width={W} height={W} rx={14} fill="#131836" />
-      <rect x={C} y={C} width={9 * C} height={9 * C} rx={8} fill="url(#mono-center)" stroke="#24504b" strokeWidth={2} />
+      <rect width={W} height={W} rx={14} fill="url(#mono-bg)" />
+      <rect x={C} y={C} width={9 * C} height={9 * C} rx={8} fill="url(#mono-center)" stroke="#2e6a63" strokeWidth={2} />
       {cells}
       <text x={W / 2} y={4.35 * C} textAnchor="middle" fontSize={40} fontWeight={900}
         fill="#e8b64c" letterSpacing={6} opacity={0.92} style={{ fontFamily: 'Nunito, sans-serif' }}>
@@ -163,6 +285,8 @@ function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }
       {view.lastEvent && (
         <text x={W / 2} y={6.9 * C} textAnchor="middle" fontSize={13.5} fill="#8fa0b8">{view.lastEvent}</text>
       )}
+      <rect width={W} height={W} rx={14} fill="url(#gb-boardlight)" style={{ pointerEvents: 'none' }} />
+      <rect width={W} height={W} rx={14} fill="url(#gb-vignette)" style={{ pointerEvents: 'none' }} />
       {tokens}
     </svg>
   );

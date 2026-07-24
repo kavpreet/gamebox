@@ -3,7 +3,10 @@ import type { GameSummary } from '@gamebox/shared-types';
 import type { LudoPublic, LudoMove } from '@gamebox/game-ludo';
 import { HOME, SAFE_GLOBALS, globalSquare } from '@gamebox/game-ludo';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatColor, SeatToken, SeatTokens, WinnerBanner, Prompt, Waiting, Die, EventLine, useBoardFit } from './common.js';
+import {
+  seatColor, SeatToken, SeatTokens, WinnerBanner, Prompt, Waiting, Die, EventLine, useBoardFit,
+  FxDefs, HandGlyph, CaptureBlast, RebirthPulse, type HandPhase,
+} from './common.js';
 
 const C = 40; // cell size
 
@@ -104,6 +107,16 @@ interface LudoAnim {
   token: number;
   x: number;
   y: number;
+  phase: HandPhase;
+  t: number;
+}
+
+interface LudoCaptureFx {
+  seat: number;
+  token: number;
+  oldXY: { x: number; y: number };
+  yardXY: { x: number; y: number };
+  stage: 'ghost' | 'blast' | 'rebirth';
 }
 
 function cloneTokens(tokens: Record<number, number[]>): Record<number, number[]> {
@@ -116,13 +129,18 @@ function easeInOutQuad(t: number): number {
   return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 }
 
+const GRAB = 220;
+const DROP = 260;
+
 /**
- * Detects the one token that just advanced (by diffing against the previous
- * render's progress values) and animates it: a smooth glide out of the yard,
- * or a square-by-square hop along the track/home column otherwise.
+ * Diffs token progress between renders and drives the drama: a hand grabs
+ * the advancing token, hops (or glides, out of the yard) it to its square,
+ * and sets it down. Any token sent home stays as a "ghost" on its square
+ * until the mover lands, explodes, then pops back in at its yard spot.
  */
-function useLudoAnimation(view: LudoPublic): LudoAnim | null {
+function useLudoAnimation(view: LudoPublic): { anim: LudoAnim | null; captures: LudoCaptureFx[] } {
   const [anim, setAnim] = useState<LudoAnim | null>(null);
+  const [captures, setCaptures] = useState<LudoCaptureFx[]>([]);
   const prevRef = useRef<Record<number, number[]> | null>(null);
   const moveKeyRef = useRef<string | null>(null);
 
@@ -134,6 +152,7 @@ function useLudoAnimation(view: LudoPublic): LudoAnim | null {
     }
 
     let found: { seat: number; token: number; oldP: number; newP: number } | null = null;
+    const sentHome: { seat: number; token: number; oldP: number }[] = [];
     for (const seat of view.order) {
       const oldArr = prev[seat] ?? [];
       const newArr = view.tokens[seat] ?? [];
@@ -141,7 +160,10 @@ function useLudoAnimation(view: LudoPublic): LudoAnim | null {
         const oldP = oldArr[i] ?? -1;
         const newP = newArr[i]!;
         if (newP === oldP) continue;
-        if (newP === -1) continue; // captured — snap, no hop
+        if (newP === -1) {
+          if (oldP >= 0) sentHome.push({ seat, token: i, oldP });
+          continue;
+        }
         const advanced = oldP === -1 || newP > oldP;
         if (!advanced) continue;
         const jump = newP - (oldP === -1 ? 0 : oldP);
@@ -149,54 +171,83 @@ function useLudoAnimation(view: LudoPublic): LudoAnim | null {
       }
     }
     prevRef.current = cloneTokens(view.tokens);
-    if (!found) return;
+    if (!found && sentHome.length === 0) return;
 
-    const moveKey = `${found.seat}-${found.token}-${found.oldP}-${found.newP}`;
+    const moveKey = `${found?.seat}-${found?.token}-${found?.oldP}-${found?.newP}-${sentHome.map((c) => `${c.seat}.${c.token}`).join('+')}`;
     if (moveKeyRef.current === moveKey) return;
     moveKeyRef.current = moveKey;
 
     let cancelled = false;
-    const { seat, token, oldP, newP } = found;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    let arriveMs = 0;
 
-    if (oldP === -1) {
-      const from = progressXY(view, seat, -1, token);
-      const to = progressXY(view, seat, newP, token);
-      const duration = 350;
+    if (found) {
+      const { seat, token, oldP, newP } = found;
+      const pts: { x: number; y: number }[] = [];
+      let segMs: number;
+      if (oldP === -1) {
+        pts.push(progressXY(view, seat, -1, token), progressXY(view, seat, newP, token));
+        segMs = 420;
+      } else {
+        for (let p = oldP; p <= newP; p++) pts.push(progressXY(view, seat, p, token));
+        segMs = 135;
+      }
+      const moveMs = (pts.length - 1) * segMs;
+      arriveMs = GRAB + moveMs;
+      const total = GRAB + moveMs + DROP;
       const start = performance.now();
       const frame = (now: number) => {
         if (cancelled) return;
-        const t = Math.min(1, (now - start) / duration);
-        const e = easeInOutQuad(t);
-        setAnim({ seat, token, x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e });
-        if (t < 1) requestAnimationFrame(frame);
-        else setTimeout(() => !cancelled && setAnim(null), 100);
+        const el = now - start;
+        if (el >= total) {
+          setAnim(null);
+          return;
+        }
+        if (el < GRAB) {
+          setAnim({ seat, token, ...pts[0]!, phase: 'grab', t: el / GRAB });
+        } else if (el < GRAB + moveMs) {
+          const k = (el - GRAB) / segMs;
+          const i = Math.min(Math.floor(k), pts.length - 2);
+          const e = easeInOutQuad(k - i);
+          const a = pts[i]!, b = pts[i + 1]!;
+          const lift = Math.sin((k - i) * Math.PI) * (pts.length > 2 ? 5 : 8);
+          setAnim({
+            seat, token,
+            x: a.x + (b.x - a.x) * e,
+            y: a.y + (b.y - a.y) * e - lift,
+            phase: 'drag',
+            t: (el - GRAB) / moveMs,
+          });
+        } else {
+          setAnim({ seat, token, ...pts[pts.length - 1]!, phase: 'drop', t: (el - GRAB - moveMs) / DROP });
+        }
+        requestAnimationFrame(frame);
       };
       requestAnimationFrame(frame);
-      return () => {
-        cancelled = true;
-      };
     }
 
-    const steps: number[] = [];
-    for (let p = oldP + 1; p <= newP; p++) steps.push(p);
-    let i = 0;
-    const hop = () => {
-      if (cancelled) return;
-      const p = steps[i]!;
-      const { x, y } = progressXY(view, seat, p, token);
-      setAnim({ seat, token, x, y });
-      i++;
-      if (i < steps.length) setTimeout(hop, 110);
-      else setTimeout(() => !cancelled && setAnim(null), 120);
-    };
-    hop();
+    if (sentHome.length > 0) {
+      const fx = sentHome.map((c) => ({
+        seat: c.seat,
+        token: c.token,
+        oldXY: progressXY(view, c.seat, c.oldP, c.token),
+        yardXY: progressXY(view, c.seat, -1, c.token),
+        stage: 'ghost' as const,
+      }));
+      setCaptures(fx);
+      timers.push(setTimeout(() => !cancelled && setCaptures(fx.map((f) => ({ ...f, stage: 'blast' }))), arriveMs));
+      timers.push(setTimeout(() => !cancelled && setCaptures(fx.map((f) => ({ ...f, stage: 'rebirth' }))), arriveMs + 420));
+      timers.push(setTimeout(() => !cancelled && setCaptures([]), arriveMs + 1500));
+    }
+
     return () => {
       cancelled = true;
+      timers.forEach(clearTimeout);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(view.tokens)]);
 
-  return anim;
+  return { anim, captures };
 }
 
 function Board({
@@ -213,13 +264,22 @@ function Board({
   onMoveToken?: (token: number) => void;
 }) {
   const W = 15 * C;
-  const anim = useLudoAnimation(view);
+  const { anim, captures } = useLudoAnimation(view);
   const fit = useBoardFit();
+  const hiddenByFx = new Set(captures.map((c) => `${c.seat}-${c.token}`));
 
   return (
     <svg viewBox={`0 0 ${W} ${W}`} preserveAspectRatio={fit}
       style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}>
-      <rect width={W} height={W} fill="#141830" rx={12} />
+      <FxDefs />
+      <defs>
+        <radialGradient id="ludo-bg" cx="50%" cy="35%" r="90%">
+          <stop offset="0%" stopColor="#1c2350" />
+          <stop offset="60%" stopColor="#131737" />
+          <stop offset="100%" stopColor="#0c0f24" />
+        </radialGradient>
+      </defs>
+      <rect width={W} height={W} fill="url(#ludo-bg)" rx={12} />
       {/* yards */}
       {YARD_BOXES.map(([bx, by], i) => {
         const seat = view.order.find((s) => orderPosOf(view, s) === i);
@@ -244,17 +304,23 @@ function Board({
             width={C - 2}
             height={C - 2}
             rx={5}
-            fill={entrySeat !== undefined ? seatColor(summary, entrySeat) : SAFE_GLOBALS.has(i) ? '#2c3255' : '#1e2340'}
-            opacity={entrySeat !== undefined ? 0.6 : 1}
-            stroke="#2c3255"
+            fill={entrySeat !== undefined ? seatColor(summary, entrySeat) : SAFE_GLOBALS.has(i) ? '#39406e' : '#262c52'}
+            opacity={entrySeat !== undefined ? 0.75 : 1}
+            stroke="rgba(0,0,0,0.45)"
           />
         );
       })}
+      {/* track cell bevels */}
+      {TRACK.map(([cx, cy], i) => (
+        <rect key={`b${i}`} x={cx * C + 1} y={cy * C + 1} width={C - 2} height={C - 2} rx={5}
+          fill="none" stroke="rgba(255,255,255,0.09)" strokeWidth={1}
+          style={{ pointerEvents: 'none' }} />
+      ))}
       {/* safe stars */}
       {[...SAFE_GLOBALS].map((g) => {
         const { x, y } = center(TRACK[g]!);
         return (
-          <text key={g} x={x} y={y + 5} textAnchor="middle" fontSize={16} fill="#69709c">★</text>
+          <text key={g} x={x} y={y + 6} textAnchor="middle" fontSize={18} fill="#ffcf5c" opacity={0.85}>★</text>
         );
       })}
       {/* home columns */}
@@ -262,15 +328,20 @@ function Board({
         const seat = view.order.find((s) => orderPosOf(view, s) === i);
         return cells.map(([cx, cy], j) => (
           <rect key={`${i}-${j}`} x={cx * C + 1} y={cy * C + 1} width={C - 2} height={C - 2} rx={5}
-            fill={seat !== undefined ? seatColor(summary, seat) : '#1b2038'} opacity={seat !== undefined ? 0.35 : 1} />
+            fill={seat !== undefined ? seatColor(summary, seat) : '#1b2038'} opacity={seat !== undefined ? 0.5 : 1}
+            stroke="rgba(0,0,0,0.35)" />
         ));
       })}
       {/* center */}
-      <rect x={6 * C} y={6 * C} width={3 * C} height={3 * C} fill="#232847" rx={8} />
-      <text x={7.5 * C} y={7.5 * C + 6} textAnchor="middle" fontSize={20} fill="#69709c">🏠</text>
+      <rect x={6 * C} y={6 * C} width={3 * C} height={3 * C} fill="#2b3159" rx={8} stroke="rgba(255,255,255,0.12)" />
+      <text x={7.5 * C} y={7.5 * C + 8} textAnchor="middle" fontSize={26} fill="#9aa3d8">🏠</text>
+      {/* board depth */}
+      <rect width={W} height={W} rx={12} fill="url(#gb-boardlight)" style={{ pointerEvents: 'none' }} />
+      <rect width={W} height={W} rx={12} fill="url(#gb-vignette)" style={{ pointerEvents: 'none' }} />
       {/* tokens */}
       {tokenSpots(view)
         .filter((s) => !anim || s.seat !== anim.seat || s.token !== anim.token)
+        .filter((s) => !hiddenByFx.has(`${s.seat}-${s.token}`))
         .map((s) => {
           const clickable = yourSeat === s.seat && movable?.includes(s.token) && onMoveToken;
           return (
@@ -286,9 +357,29 @@ function Board({
             </g>
           );
         })}
+      {/* capture drama: ghost on the square → 💥 → ✨ rebirth in the yard */}
+      {captures.map((c) => (
+        <g key={`fx-${c.seat}-${c.token}`} style={{ pointerEvents: 'none' }}>
+          {c.stage === 'ghost' && (
+            <SeatToken summary={summary} seat={c.seat} cx={c.oldXY.x} cy={c.oldXY.y} r={C * 0.36} />
+          )}
+          {c.stage === 'blast' && (
+            <CaptureBlast x={c.oldXY.x} y={c.oldXY.y} color={seatColor(summary, c.seat)} r={C * 0.45} />
+          )}
+          {c.stage === 'rebirth' && (
+            <>
+              <RebirthPulse x={c.yardXY.x} y={c.yardXY.y} color={seatColor(summary, c.seat)} r={C * 0.45} />
+              <g className="gb-pop">
+                <SeatToken summary={summary} seat={c.seat} cx={c.yardXY.x} cy={c.yardXY.y} r={C * 0.36} />
+              </g>
+            </>
+          )}
+        </g>
+      ))}
       {anim && (
-        <g style={{ filter: 'drop-shadow(0 3px 4px rgba(0,0,0,0.5))' }}>
+        <g style={{ filter: 'drop-shadow(0 5px 6px rgba(0,0,0,0.55))', pointerEvents: 'none' }}>
           <SeatToken summary={summary} seat={anim.seat} cx={anim.x} cy={anim.y} r={C * 0.4} />
+          <HandGlyph x={anim.x} y={anim.y} phase={anim.phase} t={anim.t} size={C * 1.05} />
         </g>
       )}
     </svg>
