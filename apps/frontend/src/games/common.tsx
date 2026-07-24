@@ -64,12 +64,16 @@ export function SeatToken({ summary, seat, cx, cy, r, ringOnly }: {
   const transparent = ringOnly || color === 'transparent';
   return (
     <g>
-      {!transparent && <circle cx={cx} cy={cy + r * 0.15} r={r} fill="rgba(0,0,0,0.35)" />}
+      {!transparent && <ellipse cx={cx} cy={cy + r * 0.28} rx={r * 1.05} ry={r * 0.85} fill="rgba(0,0,0,0.4)" />}
       <circle cx={cx} cy={cy} r={r}
         fill={transparent ? 'none' : color}
         stroke={transparent ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.55)'}
         strokeWidth={transparent ? Math.max(2, r * 0.22) : Math.max(1.5, r * 0.12)} />
-      {!transparent && <circle cx={cx - r * 0.3} cy={cy - r * 0.3} r={r * 0.22} fill="rgba(255,255,255,0.4)" />}
+      {!transparent && (
+        // domed top-light; falls back to a plain sheen if the board has no FxDefs
+        <circle cx={cx} cy={cy} r={r * 0.94} fill="url(#gb-shine) rgba(255,255,255,0.18)" style={{ pointerEvents: 'none' }} />
+      )}
+      {!transparent && <circle cx={cx - r * 0.3} cy={cy - r * 0.32} r={r * 0.24} fill="rgba(255,255,255,0.45)" />}
       {icon && (
         <text x={cx} y={cy + r * 0.35} textAnchor="middle" fontSize={r * 1.3} style={{ pointerEvents: 'none' }}>
           {icon}
@@ -128,6 +132,213 @@ export function useSlideAnim(
   }, [moveKey]);
 
   return pos;
+}
+
+export type HandPhase = 'grab' | 'drag' | 'drop';
+
+export interface HandMoveState {
+  /** live position of the carried piece */
+  x: number;
+  y: number;
+  phase: HandPhase;
+  /** progress through the current phase, 0..1 */
+  t: number;
+}
+
+/**
+ * "A hand picks the piece up, drags it, and sets it down" — the dramatic
+ * version of useSlideAnim. Same contract: pass a moveKey that changes once
+ * per real move; returns null when idle (render the piece at rest), or the
+ * live carried position + phase while animating. Render the piece at {x,y}
+ * and a <HandGlyph> on top.
+ */
+export function useHandMove(
+  moveKey: string | null,
+  from: { x: number; y: number } | null,
+  to: { x: number; y: number } | null,
+  duration = 480,
+): HandMoveState | null {
+  const [st, setSt] = useState<HandMoveState | null>(null);
+  const seen = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!moveKey || !from || !to) return;
+    if (seen.current === moveKey) return;
+    const isFirst = seen.current === null;
+    seen.current = moveKey;
+    if (isFirst) return; // don't animate initial mount / rehydrate
+
+    const GRAB = 220;
+    const DROP = 260;
+    let cancelled = false;
+    const start = performance.now();
+    const frame = (now: number) => {
+      if (cancelled) return;
+      const el = now - start;
+      if (el >= GRAB + duration + DROP) {
+        setSt(null);
+        return;
+      }
+      if (el < GRAB) {
+        setSt({ x: from.x, y: from.y, phase: 'grab', t: el / GRAB });
+      } else if (el < GRAB + duration) {
+        const t = (el - GRAB) / duration;
+        const e = easeInOutQuad(t);
+        const lift = Math.sin(t * Math.PI) * 7; // slight arc, like lifting off the board
+        setSt({
+          x: from.x + (to.x - from.x) * e,
+          y: from.y + (to.y - from.y) * e - lift,
+          phase: 'drag',
+          t,
+        });
+      } else {
+        setSt({ x: to.x, y: to.y, phase: 'drop', t: (el - GRAB - duration) / DROP });
+      }
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moveKey]);
+
+  return st;
+}
+
+/** The hand that "moves" pieces. Draw after the carried piece so it sits on top. */
+export function HandGlyph({ x, y, phase, t, size = 40 }: {
+  x: number;
+  y: number;
+  phase: HandPhase;
+  t: number;
+  size?: number;
+}) {
+  const holding = phase === 'drag';
+  // hand descends onto the piece, pinches while dragging, lifts away after
+  const hover = phase === 'grab' ? (1 - t) * size * 0.6 : phase === 'drop' ? t * size * 0.7 : 0;
+  const opacity = phase === 'grab' ? Math.min(1, t * 2 + 0.3) : phase === 'drop' ? 1 - t : 1;
+  return (
+    <text
+      x={x + size * 0.34}
+      y={y + size * 0.52 - hover}
+      textAnchor="middle"
+      fontSize={size}
+      opacity={opacity}
+      transform={`rotate(-28 ${x} ${y})`}
+      style={{ pointerEvents: 'none', userSelect: 'none' }}
+    >
+      {holding ? '🤏' : '🖐'}
+    </text>
+  );
+}
+
+/**
+ * True while `key` changed within the last `ms` (after `delay`). Skips the
+ * first observed key so rehydrates don't flash effects. Use for transient
+ * board FX: capture explosions, rebirth pulses, conquest flashes.
+ */
+export function useRecentChange(key: string | null, ms = 900, delay = 0): boolean {
+  const [active, setActive] = useState(false);
+  const seen = useRef<string | null>(null);
+  useEffect(() => {
+    if (!key) return;
+    if (seen.current === key) return;
+    const isFirst = seen.current === null;
+    seen.current = key;
+    if (isFirst) return;
+    let off: ReturnType<typeof setTimeout>;
+    const on = setTimeout(() => {
+      setActive(true);
+      off = setTimeout(() => setActive(false), ms);
+    }, delay);
+    return () => {
+      clearTimeout(on);
+      if (off) clearTimeout(off);
+      setActive(false);
+    };
+  }, [key, ms, delay]);
+  return active;
+}
+
+/**
+ * Explosion where a piece just got captured/conquered: white flash, shock
+ * ring, flying shards, 💥. Mount it (conditionally) when the capture happens —
+ * CSS keyframes run once on mount. Pair with useRecentChange for timing.
+ */
+export function CaptureBlast({ x, y, color, r = 18 }: { x: number; y: number; color: string; r?: number }) {
+  const N = 10;
+  return (
+    <g style={{ pointerEvents: 'none' }}>
+      <circle cx={x} cy={y} r={r * 1.4} fill="#ffffff" className="gb-flash" />
+      <circle cx={x} cy={y} r={r * 2.1} fill="none" stroke={color} strokeWidth={Math.max(2.5, r * 0.16)} className="gb-ring" />
+      {Array.from({ length: N }, (_, i) => {
+        const deg = (i / N) * 360 + 17;
+        const dist = r * (2 + (i % 3) * 0.6);
+        return (
+          <g key={i} transform={`translate(${x} ${y}) rotate(${deg})`}>
+            <circle
+              r={r * (i % 2 ? 0.14 : 0.22)}
+              fill={i % 3 === 2 ? '#ffd97a' : color}
+              className="gb-shard"
+              style={{ ['--gb-dist' as string]: `${dist}px` }}
+            />
+          </g>
+        );
+      })}
+      <text x={x} y={y + r * 0.55} textAnchor="middle" fontSize={r * 1.9} className="gb-boom">💥</text>
+    </g>
+  );
+}
+
+/**
+ * Rebirth glow at the spot where a captured piece respawns (Ludo yard,
+ * Sorry! start, etc). Converging ring + soft glow; render the respawned
+ * piece with className="gb-pop" alongside for the pop-in.
+ */
+export function RebirthPulse({ x, y, color, r = 18 }: { x: number; y: number; color: string; r?: number }) {
+  return (
+    <g style={{ pointerEvents: 'none' }}>
+      <circle cx={x} cy={y} r={r * 1.6} fill={color} opacity={0.25} className="gb-flash" />
+      <circle cx={x} cy={y} r={r * 1.5} fill="none" stroke={color} strokeWidth={Math.max(2, r * 0.14)} className="gb-rebirth-ring" />
+      <text x={x} y={y + r * 0.4} textAnchor="middle" fontSize={r * 1.3} className="gb-boom">✨</text>
+    </g>
+  );
+}
+
+/**
+ * Shared pseudo-3D defs for board SVGs. Include once inside the <svg>, then
+ * reference: url(#gb-shine) (radial top-light for tokens/tiles),
+ * url(#gb-vignette) (edge darkening over the whole board),
+ * url(#gb-boardlight) (diagonal top-light wash), filter url(#gb-glow).
+ */
+export function FxDefs() {
+  return (
+    <defs>
+      <radialGradient id="gb-shine" cx="35%" cy="30%" r="75%">
+        <stop offset="0%" stopColor="#ffffff" stopOpacity="0.55" />
+        <stop offset="45%" stopColor="#ffffff" stopOpacity="0.12" />
+        <stop offset="100%" stopColor="#000000" stopOpacity="0.25" />
+      </radialGradient>
+      <radialGradient id="gb-vignette" cx="50%" cy="42%" r="72%">
+        <stop offset="0%" stopColor="#000000" stopOpacity="0" />
+        <stop offset="78%" stopColor="#000000" stopOpacity="0" />
+        <stop offset="100%" stopColor="#000000" stopOpacity="0.38" />
+      </radialGradient>
+      <linearGradient id="gb-boardlight" x1="0%" y1="0%" x2="65%" y2="100%">
+        <stop offset="0%" stopColor="#ffffff" stopOpacity="0.10" />
+        <stop offset="45%" stopColor="#ffffff" stopOpacity="0.02" />
+        <stop offset="100%" stopColor="#000000" stopOpacity="0.16" />
+      </linearGradient>
+      <filter id="gb-glow" x="-60%" y="-60%" width="220%" height="220%">
+        <feGaussianBlur stdDeviation="4" result="b" />
+        <feMerge>
+          <feMergeNode in="b" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+    </defs>
+  );
 }
 
 /**

@@ -307,6 +307,48 @@ input:focus, select:focus {
   100% { transform: scale(1); }
 }
 
+/* ── board FX (SVG capture blasts, rebirth pulses, pop-ins) ──
+   All run once on mount; boards mount them conditionally via
+   useRecentChange. transform-box makes scale() work on SVG shapes. */
+.gb-flash, .gb-ring, .gb-shard, .gb-boom, .gb-pop, .gb-rebirth-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.gb-flash { animation: gb-flash 0.32s ease-out both; }
+@keyframes gb-flash {
+  from { transform: scale(0.15); opacity: 1; }
+  to { transform: scale(1.35); opacity: 0; }
+}
+.gb-ring { animation: gb-ring 0.6s ease-out both; }
+@keyframes gb-ring {
+  from { transform: scale(0.15); opacity: 0.95; }
+  to { transform: scale(1.3); opacity: 0; }
+}
+.gb-shard { animation: gb-shard 0.62s cubic-bezier(0.1, 0.7, 0.4, 1) both; }
+@keyframes gb-shard {
+  from { transform: translateX(4px) scale(1); opacity: 1; }
+  to { transform: translateX(var(--gb-dist, 40px)) scale(0.35); opacity: 0; }
+}
+.gb-boom { animation: gb-boom 0.6s ease-out both; }
+@keyframes gb-boom {
+  0% { transform: scale(0.3); opacity: 0; }
+  25% { transform: scale(1.25); opacity: 1; }
+  70% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1.1); opacity: 0; }
+}
+.gb-rebirth-ring { animation: gb-rebirth-ring 0.7s ease-in both; }
+@keyframes gb-rebirth-ring {
+  0% { transform: scale(2.2); opacity: 0; }
+  35% { opacity: 0.9; }
+  100% { transform: scale(0.35); opacity: 0; }
+}
+.gb-pop { animation: gb-pop 0.45s cubic-bezier(0.2, 1.5, 0.4, 1) both; }
+@keyframes gb-pop {
+  0% { transform: scale(0); }
+  70% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+
 /* Event ticker line */
 .event-line {
   text-align: center;
