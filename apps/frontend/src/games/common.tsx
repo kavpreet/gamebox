@@ -231,7 +231,11 @@ export function useRecentChange(key: string | null, ms = 900, delay = 0): boolea
   const [active, setActive] = useState(false);
   const seen = useRef<string | null>(null);
   useEffect(() => {
-    if (!key) return;
+    if (!key) {
+      // a null key IS an observation — the next real key should fire
+      if (seen.current === null) seen.current = '';
+      return;
+    }
     if (seen.current === key) return;
     const isFirst = seen.current === null;
     seen.current = key;
@@ -248,6 +252,83 @@ export function useRecentChange(key: string | null, ms = 900, delay = 0): boolea
     };
   }, [key, ms, delay]);
   return active;
+}
+
+/**
+ * Tumbling dice: when `key` changes, the returned faces cycle randomly for
+ * `ms`, then settle on `values`. Skips the first observed key so rehydrates
+ * don't roll. Callers time dependent animations off the same `ms`.
+ */
+export function useDiceRoll(key: string | null, values: number[], ms = 700): { faces: number[]; rolling: boolean } {
+  const [tumble, setTumble] = useState<number[] | null>(null);
+  const seen = useRef<string | null>(null);
+  const count = values.length;
+  useEffect(() => {
+    if (!key) {
+      // a null key IS an observation — the next real key should tumble
+      if (seen.current === null) seen.current = '';
+      return;
+    }
+    if (seen.current === key) return;
+    const isFirst = seen.current === null;
+    seen.current = key;
+    if (isFirst) return;
+    const spin = () => Array.from({ length: count }, () => 1 + Math.floor(Math.random() * 6));
+    const start = performance.now();
+    setTumble(spin());
+    const iv = setInterval(() => {
+      if (performance.now() - start >= ms) {
+        clearInterval(iv);
+        setTumble(null);
+      } else {
+        setTumble(spin());
+      }
+    }, 90);
+    return () => {
+      clearInterval(iv);
+      setTumble(null);
+    };
+  }, [key, ms, count]);
+  return { faces: tumble ?? values, rolling: tumble !== null };
+}
+
+/** One transient cash change on somebody's ledger. */
+export interface CashDelta {
+  seat: Seat;
+  delta: number;
+  id: number;
+}
+
+/**
+ * Diffs a seat→cash ledger between renders and surfaces each change as a
+ * transient event for ~`ms` (floating "+$200" badges, flying bills). The
+ * first observed ledger is skipped so rehydrates don't shower money.
+ */
+export function useCashDeltas(cash: Record<number, number>, ms = 1700): CashDelta[] {
+  const [events, setEvents] = useState<CashDelta[]>([]);
+  const prev = useRef<Record<number, number> | null>(null);
+  const idRef = useRef(0);
+  const key = Object.entries(cash).map(([s, c]) => `${s}:${c}`).join(',');
+  useEffect(() => {
+    const p = prev.current;
+    prev.current = { ...cash };
+    if (!p) return;
+    const evs: CashDelta[] = [];
+    for (const [sStr, c] of Object.entries(cash)) {
+      const s = Number(sStr) as Seat;
+      const d = c - (p[s] ?? c);
+      if (d !== 0) evs.push({ seat: s, delta: d, id: idRef.current++ });
+    }
+    if (evs.length === 0) return;
+    setEvents(evs);
+    const t = setTimeout(() => setEvents([]), ms);
+    return () => {
+      clearTimeout(t);
+      setEvents([]);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, ms]);
+  return events;
 }
 
 /**
@@ -388,10 +469,16 @@ export function Waiting({ state }: { state: LiveState<any, any> }) {
 const PIP_CELLS: Record<number, number[]> = {
   1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8],
 };
-export function Die({ value, size = 52 }: { value: number; size?: number }) {
-  const pips = PIP_CELLS[value] ?? [];
+export function Die({ value, size = 52, rollKey }: { value: number; size?: number; rollKey?: string }) {
+  const { faces, rolling } = useDiceRoll(rollKey ?? String(value), [value]);
+  const face = faces[0]!;
+  const pips = PIP_CELLS[face] ?? [];
   return (
-    <span className="die rolled" key={value} style={{ width: size, height: size }}>
+    <span
+      className={`die ${rolling ? 'tumbling' : 'rolled'}`}
+      key={rolling ? 'tumble' : `v${value}`}
+      style={{ width: size, height: size }}
+    >
       {Array.from({ length: 9 }, (_, i) => (
         <span key={i} className={pips.includes(i) ? 'pip' : ''} style={{ width: size * 0.17, height: size * 0.17 }} />
       ))}

@@ -1,11 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { MonopolyPublic, MonopolyMove } from '@gamebox/game-monopoly';
-import { BOARD, rentFor } from '@gamebox/game-monopoly';
+import { BOARD, rentFor, CHEST_CARDS } from '@gamebox/game-monopoly';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
 import type { GameSummary } from '@gamebox/shared-types';
 import {
   seatName, seatColor, SeatDot, SeatToken, WinnerBanner, Prompt, Waiting, Die, EventLine, useBoardFit,
-  FxDefs, HandGlyph, CaptureBlast, type HandPhase,
+  FxDefs, HandGlyph, CaptureBlast, type HandPhase, useDiceRoll, useCashDeltas, type CashDelta,
 } from './common.js';
 
 const GROUP_HEX: Record<string, string> = {
@@ -54,10 +54,15 @@ interface MonoAnim {
  * by cell around the ring under a hand; teleports (cards, go-to-jail) are a
  * single glide, with a blast when you're slammed into jail.
  */
+/** dice tumble length — token movement waits this long after a roll */
+const DICE_MS = 750;
+
 function useMonopolyAnim(view: MonopolyPublic, C: number): { anim: MonoAnim | null; jailFx: number | null } {
   const [anim, setAnim] = useState<MonoAnim | null>(null);
   const [jailFx, setJailFx] = useState<number | null>(null);
   const prevRef = useRef<Record<number, number> | null>(null);
+  const rollRef = useRef<string | null>(null);
+  const rollKey = view.lastRoll ? `${view.lastRoll.d1},${view.lastRoll.d2},${view.turnIndex}` : '';
 
   useEffect(() => {
     const cur: Record<number, number> = {};
@@ -88,7 +93,9 @@ function useMonopolyAnim(view: MonopolyPublic, C: number): { anim: MonoAnim | nu
     }
     const slammedToJail = to === 10 && view.players[seat]!.inJail;
 
-    const GRAB = 200, DROP = 240;
+    // if this move came with a fresh roll, hold the token while the dice tumble
+    const rolled = rollRef.current !== null && rollRef.current !== rollKey;
+    const GRAB = 200 + (rolled ? DICE_MS : 0), DROP = 240;
     const moveMs = (pts.length - 1) * segMs;
     const total = GRAB + moveMs + DROP;
     let cancelled = false;
@@ -127,7 +134,141 @@ function useMonopolyAnim(view: MonopolyPublic, C: number): { anim: MonoAnim | nu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view.order.map((s) => view.players[s]!.position).join(',')]);
 
+  // runs after the anim effect above, so it sees the pre-roll value first
+  useEffect(() => {
+    rollRef.current = rollKey;
+  }, [rollKey]);
+
   return { anim, jailFx };
+}
+
+/** Mounts children after `ms` — lets card reveals wait for dice + token motion. */
+function Delayed({ ms, children }: { ms: number; children: ReactNode }) {
+  const [show, setShow] = useState(ms <= 0);
+  useEffect(() => {
+    const t = setTimeout(() => setShow(true), ms);
+    return () => clearTimeout(t);
+  }, [ms]);
+  return show ? <>{children}</> : null;
+}
+
+/**
+ * Classic title-deed card. Streets get the color band + rent ladder
+ * (current rent row highlighted), railroads/utilities their own tables.
+ */
+function DeedCard({ pos, view, summary, width = 220 }: {
+  pos: number;
+  view: MonopolyPublic;
+  summary?: GameSummary;
+  width?: number;
+}) {
+  const sp = BOARD[pos]!;
+  const prop = view.properties[pos];
+  const groupColor = sp.group ? GROUP_HEX[sp.group] : null;
+  const ownsGroup = prop != null && sp.group != null &&
+    BOARD.every((s, i) => s.group !== sp.group || view.properties[i]?.owner === prop.owner);
+
+  const row = (label: string, value: string, active: boolean, key: string) => (
+    <div key={key} className="row between" style={{
+      fontSize: width * 0.052,
+      padding: `${width * 0.008}px ${width * 0.03}px`,
+      borderRadius: 4,
+      background: active ? '#ffe9a8' : 'transparent',
+      fontWeight: active ? 900 : 600,
+      color: '#2b2416',
+    }}>
+      <span>{label}</span><strong>{value}</strong>
+    </div>
+  );
+
+  let rows: React.ReactElement[] = [];
+  if (sp.type === 'street') {
+    const h = prop?.houses ?? -1;
+    rows = [
+      row('Rent', `$${sp.rent![0]}`, h === 0 && !ownsGroup, 'r0'),
+      row('— with full set', `$${sp.rent![0]! * 2}`, h === 0 && ownsGroup, 'rset'),
+      ...[1, 2, 3, 4].map((n) => row(`With ${n} house${n > 1 ? 's' : ''}`, `$${sp.rent![n]}`, h === n, `r${n}`)),
+      row('With HOTEL', `$${sp.rent![5]}`, h === 5, 'r5'),
+      row('House cost', `$${sp.houseCost} each`, false, 'hc'),
+    ];
+  } else if (sp.type === 'railroad') {
+    const n = prop ? BOARD.filter((s, i) => s.type === 'railroad' && view.properties[i]?.owner === prop.owner).length : 0;
+    rows = [1, 2, 3, 4].map((k) => row(`${k} railroad${k > 1 ? 's' : ''} owned`, `$${25 * Math.pow(2, k - 1)}`, n === k, `rr${k}`));
+  } else if (sp.type === 'utility') {
+    const n = prop ? BOARD.filter((s, i) => s.type === 'utility' && view.properties[i]?.owner === prop.owner).length : 0;
+    rows = [
+      row('One utility', '4 × dice roll', n === 1, 'u1'),
+      row('Both utilities', '10 × dice roll', n === 2, 'u2'),
+    ];
+  }
+
+  return (
+    <div style={{
+      width,
+      background: 'linear-gradient(160deg, #fdfaef, #efe7cf)',
+      border: '2px solid #23283f',
+      borderRadius: width * 0.045,
+      overflow: 'hidden',
+      color: '#2b2416',
+      boxShadow: '0 6px 18px rgba(3,5,16,0.35)',
+      textAlign: 'center',
+      flexShrink: 0,
+    }}>
+      <div style={{
+        background: groupColor ?? '#3b4160',
+        color: groupColor === '#f2e14c' || groupColor === '#7fd4f5' ? '#23283f' : '#ffffff',
+        padding: `${width * 0.04}px ${width * 0.03}px`,
+      }}>
+        <div style={{ fontSize: width * 0.042, fontWeight: 800, letterSpacing: 1.5, opacity: 0.85 }}>
+          {sp.type === 'street' ? 'TITLE DEED' : sp.type === 'railroad' ? '🚂 RAILROAD' : '💡 UTILITY'}
+        </div>
+        <div style={{ fontSize: width * 0.068, fontWeight: 900, lineHeight: 1.15 }}>{sp.name}</div>
+      </div>
+      <div style={{ padding: `${width * 0.03}px ${width * 0.04}px` }}>
+        {rows}
+        <div className="row between" style={{
+          fontSize: width * 0.05, marginTop: width * 0.02, paddingTop: width * 0.02,
+          borderTop: '1px dashed #a89a77', fontWeight: 800, color: '#2b2416',
+        }}>
+          <span>Price ${sp.price}</span>
+          <span>Mortgage ${Math.floor(sp.price! / 2)}</span>
+        </div>
+        {prop && summary && (
+          <div className="row" style={{ justifyContent: 'center', gap: 6, marginTop: width * 0.02, fontSize: width * 0.05, fontWeight: 800, color: '#2b2416' }}>
+            <span style={{
+              width: width * 0.06, height: width * 0.06, borderRadius: '50%', flexShrink: 0,
+              background: seatColor(summary, prop.owner), border: '2px solid #23283f',
+            }} />
+            <span>{prop.mortgaged ? '🚫 mortgaged · ' : ''}{seatName(summary, prop.owner)}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** A drawn Chance / Community Chest card, styled per deck. */
+function DrawnCard({ text, width = 240 }: { text: string; width?: number }) {
+  const isChest = CHEST_CARDS.some((c) => c.text === text);
+  const deck = isChest ? { name: 'COMMUNITY CHEST', emoji: '📦', bg: 'linear-gradient(160deg, #7cc6f2, #3f9bd8)', fg: '#0c2b45' }
+    : { name: 'CHANCE', emoji: '❓', bg: 'linear-gradient(160deg, #ffbe6b, #f5891f)', fg: '#4a2800' };
+  return (
+    <div style={{
+      width,
+      background: deck.bg,
+      border: '2px solid #23283f',
+      borderRadius: width * 0.05,
+      padding: `${width * 0.05}px ${width * 0.06}px`,
+      color: deck.fg,
+      textAlign: 'center',
+      boxShadow: '0 6px 18px rgba(3,5,16,0.35)',
+      flexShrink: 0,
+    }}>
+      <div style={{ fontSize: width * 0.16 }}>{deck.emoji}</div>
+      <div style={{ fontSize: width * 0.05, fontWeight: 900, letterSpacing: 2 }}>{deck.name}</div>
+      <div style={{ fontSize: width * 0.062, fontWeight: 800, marginTop: width * 0.03, lineHeight: 1.3 }}>{text}</div>
+    </div>
+  );
 }
 
 /** Break a space name into at most two short lines that fit a cell. */
@@ -149,6 +290,12 @@ function splitName(name: string): string[] {
 function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }) {
   const C = 62;
   const { anim, jailFx } = useMonopolyAnim(view, C);
+  const diceKey = view.lastRoll
+    ? `${view.lastRoll.d1},${view.lastRoll.d2},${view.turnIndex},${view.order.map((s) => view.players[s]!.position).join('.')}`
+    : null;
+  const { faces: diceFaces, rolling } = useDiceRoll(
+    diceKey, view.lastRoll ? [view.lastRoll.d1, view.lastRoll.d2] : [], DICE_MS,
+  );
   const cells: React.ReactElement[] = [];
   BOARD.forEach((sp, pos) => {
     const [cx, cy] = cellOf(pos);
@@ -232,7 +379,9 @@ function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }
             )}
           </>
         )}
-        {housePips}
+        {housePips.length > 0 && (
+          <g key={`hp${pos}-${prop!.houses}`} className="gb-pop">{housePips}</g>
+        )}
         {prop && (
           <g opacity={prop.mortgaged ? 0.55 : 1}>
             <circle cx={ownX} cy={ownY} r={7} fill="#ffffff" />
@@ -304,7 +453,7 @@ function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }
       </g>
       {view.lastRoll && (
         <g>
-          {[view.lastRoll.d1, view.lastRoll.d2].map((d, i) => {
+          {diceFaces.map((d, i) => {
             const dx = W / 2 - 42 + i * 48;
             const dy = 6.55 * C;
             const pips: Record<number, [number, number][]> = {
@@ -313,8 +462,13 @@ function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }
               5: [[0.25, 0.25], [0.75, 0.25], [0.5, 0.5], [0.25, 0.75], [0.75, 0.75]],
               6: [[0.25, 0.25], [0.75, 0.25], [0.25, 0.5], [0.75, 0.5], [0.25, 0.75], [0.75, 0.75]],
             };
+            // tumbling dice bounce and twist a little; settled dice pop in place
+            const rot = rolling ? ((d * 47 + i * 29) % 21) - 10 : 0;
+            const dyJit = rolling ? ((d * 31 + i * 17) % 7) - 3 : 0;
             return (
-              <g key={i}>
+              <g key={rolling ? `t${i}` : `s${i}-${d}`}
+                transform={`rotate(${rot} ${dx + 18} ${dy + 18}) translate(0 ${dyJit})`}
+                className={rolling ? undefined : 'gb-pop'}>
                 <rect x={dx} y={dy} width={36} height={36} rx={8} fill="#f2f4ff" stroke="#0b0e1d" strokeWidth={1.5} />
                 {(pips[d] ?? []).map(([px, py], j) => (
                   <circle key={j} cx={dx + px * 36} cy={dy + py * 36} r={3.4} fill="#1a1e38" />
@@ -338,13 +492,115 @@ function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }
   );
 }
 
+/** Pair payers with payees (bank when unmatched) and fly 💸 between their chips. */
+function useCashFlyers(
+  deltas: CashDelta[],
+  mainRef: React.RefObject<HTMLDivElement | null>,
+  boardRef: React.RefObject<HTMLDivElement | null>,
+  chipRefs: React.MutableRefObject<Map<number, HTMLElement>>,
+) {
+  const [flyers, setFlyers] = useState<{ id: number; fx: number; fy: number; tx: number; ty: number }[]>([]);
+  useEffect(() => {
+    if (deltas.length === 0) {
+      setFlyers([]);
+      return;
+    }
+    const main = mainRef.current;
+    if (!main) return;
+    const mRect = main.getBoundingClientRect();
+    const center = (el: Element | null | undefined) => {
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: r.left + r.width / 2 - mRect.left, y: r.top + r.height / 2 - mRect.top };
+    };
+    const bank = center(boardRef.current) ?? { x: mRect.width / 2, y: mRect.height / 2 };
+    const payers = deltas.filter((d) => d.delta < 0);
+    const payees = deltas.filter((d) => d.delta > 0);
+    const seatPt = (s: number) => center(chipRefs.current.get(s)) ?? bank;
+    const fl: { id: number; fx: number; fy: number; tx: number; ty: number }[] = [];
+    for (let i = 0; i < Math.max(payers.length, payees.length); i++) {
+      const from = payers.length > 0 ? seatPt(payers[Math.min(i, payers.length - 1)]!.seat) : bank;
+      const to = payees.length > 0 ? seatPt(payees[Math.min(i, payees.length - 1)]!.seat) : bank;
+      fl.push({ id: i, fx: from.x, fy: from.y, tx: to.x, ty: to.y });
+    }
+    setFlyers(fl);
+    const t = setTimeout(() => setFlyers([]), 1000);
+    return () => clearTimeout(t);
+  }, [deltas, mainRef, boardRef, chipRefs]);
+  return flyers;
+}
+
 function TvView({ state }: TvViewProps<MonopolyPublic>) {
   const view = state.view;
+  const mainRef = useRef<HTMLDivElement | null>(null);
+  const boardRef = useRef<HTMLDivElement | null>(null);
+  const chipRefs = useRef<Map<number, HTMLElement>>(new Map());
+
+  const cashRecord: Record<number, number> = {};
+  if (view) for (const s of view.order) cashRecord[s] = view.players[s]!.cash;
+  const deltas = useCashDeltas(cashRecord);
+  const flyers = useCashFlyers(deltas, mainRef, boardRef, chipRefs);
+
+  // drawn chance/chest card: reveal after the dice + hop, hold a few seconds
+  const [drawn, setDrawn] = useState<string | null>(null);
+  const seenCard = useRef<string | null>(null);
+  const lastCard = view?.lastCard ?? null;
+  useEffect(() => {
+    if (seenCard.current === null) {
+      seenCard.current = lastCard ?? '';
+      return;
+    }
+    if (!lastCard) {
+      seenCard.current = '';
+      return;
+    }
+    if (lastCard === seenCard.current) return;
+    seenCard.current = lastCard;
+    const show = setTimeout(() => setDrawn(lastCard), DICE_MS + 1200);
+    const hide = setTimeout(() => setDrawn(null), DICE_MS + 1200 + 5000);
+    return () => {
+      clearTimeout(show);
+      clearTimeout(hide);
+      setDrawn(null);
+    };
+  }, [lastCard]);
+
   if (!view) return null;
+  const decider = view.order[view.turnIndex % view.order.length]!;
+
   return (
-    <div className="tv-main">
-      <div className="tv-board">
+    <div className="tv-main" ref={mainRef} style={{ position: 'relative' }}>
+      <div className="tv-board" ref={boardRef} style={{ position: 'relative' }}>
         <Board view={view} summary={state.summary} />
+        {view.pendingBuy !== null && (
+          <Delayed key={`buy${view.pendingBuy}`} ms={DICE_MS + 1500}>
+            <div className="board-overlay">
+              <div className="overlay-card">
+                <DeedCard pos={view.pendingBuy} view={view} summary={state.summary} width={280} />
+              </div>
+              <div className="overlay-caption">
+                🏠 {seatName(state.summary, decider)} — buy or send to auction?
+              </div>
+            </div>
+          </Delayed>
+        )}
+        {view.pendingBuy === null && drawn && (
+          <div className="board-overlay" key={drawn}>
+            <div className="overlay-card">
+              <DrawnCard text={drawn} width={300} />
+            </div>
+          </div>
+        )}
+        {view.phase === 'AUCTION' && view.auction && (
+          <div className="board-overlay" key={`auction${view.auction.position}`}>
+            <div className="overlay-card">
+              <DeedCard pos={view.auction.position} view={view} summary={state.summary} width={280} />
+            </div>
+            <div className="overlay-caption">
+              🔨 Sealed-bid auction — {Object.keys(view.auction.bids).length}/{view.order.filter((s) => !view.players[s]!.bankrupt).length} bids in
+            </div>
+          </div>
+        )}
       </div>
       <div className="tv-sidebar">
         {view.order.map((s) => {
@@ -352,6 +608,10 @@ function TvView({ state }: TvViewProps<MonopolyPublic>) {
           const owned = Object.values(view.properties).filter((pr) => pr.owner === s).length;
           return (
             <div key={s} className={`tv-player-chip ${state.activeSeats.includes(s) ? 'active' : ''}`}
+              ref={(el) => {
+                if (el) chipRefs.current.set(s, el);
+                else chipRefs.current.delete(s);
+              }}
               style={p.bankrupt ? { opacity: 0.4 } : undefined}>
               <SeatDot summary={state.summary} seat={s} />
               <span className="grow">
@@ -361,6 +621,11 @@ function TvView({ state }: TvViewProps<MonopolyPublic>) {
                 <div className="dim small">{owned} deeds</div>
               </span>
               <strong style={{ color: 'var(--green)' }}>${p.cash}</strong>
+              {deltas.filter((d) => d.seat === s).map((d) => (
+                <span key={d.id} className={`cash-float ${d.delta > 0 ? 'gain' : 'loss'}`}>
+                  {d.delta > 0 ? '+' : '−'}${Math.abs(d.delta)}
+                </span>
+              ))}
             </div>
           );
         })}
@@ -372,6 +637,14 @@ function TvView({ state }: TvViewProps<MonopolyPublic>) {
         {view.pendingTrade && <div className="tv-player-chip">🤝 trade pending…</div>}
         <WinnerBanner state={state} />
       </div>
+      {flyers.map((f) => (
+        <span key={f.id} className="cash-fly" style={{
+          ['--fx' as string]: `${f.fx}px`,
+          ['--fy' as string]: `${f.fy}px`,
+          ['--tx' as string]: `${f.tx}px`,
+          ['--ty' as string]: `${f.ty}px`,
+        }}>💸</span>
+      ))}
     </div>
   );
 }
@@ -385,6 +658,10 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
   const [getProps, setGetProps] = useState<number[]>([]);
   const [giveCash, setGiveCash] = useState('0');
   const [getCash, setGetCash] = useState('0');
+  const [openDeed, setOpenDeed] = useState<number | null>(null);
+  const cashRecord: Record<number, number> = {};
+  if (view) for (const s of view.order) cashRecord[s] = view.players[s]!.cash;
+  const deltas = useCashDeltas(cashRecord);
   if (!view) return null;
   const me = view.players[yourSeat]!;
   const legal = (state.legalMoves ?? []) as MonopolyMove[];
@@ -407,9 +684,15 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
       {/* status header — the full board lives on the TV */}
       <div className="card">
         <div className="row between">
-          <div>
+          <div style={{ position: 'relative' }}>
             <div className="dim small">your cash</div>
             <div style={{ fontSize: '1.9rem', fontWeight: 900, color: 'var(--green)' }}>${me.cash}</div>
+            {deltas.filter((d) => d.seat === yourSeat).map((d) => (
+              <span key={d.id} className={`cash-float ${d.delta > 0 ? 'gain' : 'loss'}`}
+                style={{ right: 'auto', left: '100%', marginLeft: 8, top: '40%' }}>
+                {d.delta > 0 ? '+' : '−'}${Math.abs(d.delta)}
+              </span>
+            ))}
           </div>
           <div style={{ textAlign: 'right' }}>
             <div className="dim small">you are on</div>
@@ -425,8 +708,8 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
         </div>
         {view.lastRoll && myTurnish && (
           <div className="action-bar">
-            <Die value={view.lastRoll.d1} size={44} />
-            <Die value={view.lastRoll.d2} size={44} />
+            <Die value={view.lastRoll.d1} size={44} rollKey={`a${view.lastRoll.d1},${view.lastRoll.d2},${view.turnIndex}`} />
+            <Die value={view.lastRoll.d2} size={44} rollKey={`b${view.lastRoll.d1},${view.lastRoll.d2},${view.turnIndex}`} />
           </div>
         )}
 
@@ -447,6 +730,11 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
         ) : view.phase === 'AUCTION' && view.auction ? (
           <>
             <Prompt>🔨 Sealed bid for {BOARD[view.auction.position]!.name} (list ${BOARD[view.auction.position]!.price})</Prompt>
+            <div style={{ display: 'flex', justifyContent: 'center', margin: '10px 0' }}>
+              <div className="pop-in">
+                <DeedCard pos={view.auction.position} view={view} summary={state.summary} width={210} />
+              </div>
+            </div>
             <div className="action-bar">
               <input style={{ width: 120 }} inputMode="numeric" placeholder="0" value={bid} onChange={(e) => setBid(e.target.value)} />
               <button onClick={() => { submitMove('BID', { amount: Number(bid) || 0 }); setBid(''); }}>Bid</button>
@@ -469,8 +757,16 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
             </div>
           </>
         ) : (
-          <div className="action-bar">
-            {kinds.has('ROLL') && <button className="big" style={{ width: 'auto' }} onClick={() => submitMove('ROLL', {})}>🎲 Roll</button>}
+          <>
+            {view.pendingBuy !== null && (
+              <div style={{ display: 'flex', justifyContent: 'center', margin: '10px 0' }}>
+                <div className="pop-in">
+                  <DeedCard pos={view.pendingBuy} view={view} summary={state.summary} width={230} />
+                </div>
+              </div>
+            )}
+            <div className="action-bar">
+              {kinds.has('ROLL') && <button className="big" style={{ width: 'auto' }} onClick={() => submitMove('ROLL', {})}>🎲 Roll</button>}
             {kinds.has('PAY_JAIL') && <button className="secondary" onClick={() => submitMove('PAY_JAIL', {})}>Pay $50 fine</button>}
             {kinds.has('BUY') && view.pendingBuy !== null && (
               <button className="gold" onClick={() => submitMove('BUY', {})}>
@@ -480,12 +776,19 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
             {kinds.has('DECLINE_BUY') && <button className="secondary" onClick={() => submitMove('DECLINE_BUY', {})}>Auction it</button>}
             {kinds.has('END_TURN') && <button className="secondary" onClick={() => submitMove('END_TURN', {})}>End turn</button>}
             {kinds.has('CANCEL_TRADE') && <button className="ghost" onClick={() => submitMove('CANCEL_TRADE', {})}>Withdraw trade</button>}
-            {(view.phase === 'ROLL' || view.phase === 'ACT') && !view.pendingTrade && (
-              <button className="ghost" onClick={() => setShowTrade(!showTrade)}>🤝 Trade…</button>
-            )}
-          </div>
+              {(view.phase === 'ROLL' || view.phase === 'ACT') && !view.pendingTrade && (
+                <button className="ghost" onClick={() => setShowTrade(!showTrade)}>🤝 Trade…</button>
+              )}
+            </div>
+          </>
         )}
-        <EventLine text={view.lastCard} />
+        {view.lastCard ? (
+          <div style={{ display: 'flex', justifyContent: 'center', margin: '10px 0' }} key={view.lastCard}>
+            <div className="pop-in">
+              <DrawnCard text={view.lastCard} width={210} />
+            </div>
+          </div>
+        ) : null}
         <EventLine text={view.lastEvent} />
       </div>
 
@@ -495,7 +798,7 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
         {view.order.map((s) => {
           const p = view.players[s]!;
           return (
-            <div key={s} className="row between" style={p.bankrupt ? { opacity: 0.4 } : undefined}>
+            <div key={s} className="row between" style={{ position: 'relative', ...(p.bankrupt ? { opacity: 0.4 } : null) }}>
               <span className="row" style={{ gap: 6 }}>
                 <SeatDot summary={state.summary} seat={s} size={13} />
                 {seatName(state.summary, s)}{s === yourSeat && ' (you)'}
@@ -503,6 +806,11 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
                 {state.activeSeats.includes(s) && <span className="badge gold-badge">turn</span>}
               </span>
               <strong style={{ color: 'var(--green)' }}>${p.cash}</strong>
+              {deltas.filter((d) => d.seat === s).map((d) => (
+                <span key={d.id} className={`cash-float ${d.delta > 0 ? 'gain' : 'loss'}`}>
+                  {d.delta > 0 ? '+' : '−'}${Math.abs(d.delta)}
+                </span>
+              ))}
             </div>
           );
         })}
@@ -511,25 +819,36 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
       {myProps.length > 0 && (
         <div className="card">
           <h3>Your properties</h3>
+          <p className="dim small">Tap a property to see its deed card.</p>
           {myProps.map((pos) => {
             const sp = BOARD[pos]!;
             const prop = view.properties[pos]!;
             return (
-              <div key={pos} className="row between">
-                <span>
-                  {sp.group && <span style={{ color: GROUP_HEX[sp.group] }}>■ </span>}
-                  {sp.name}
-                  {prop.mortgaged && <span className="dim small"> (mortgaged)</span>}
-                  {prop.houses > 0 && <span className="small"> {prop.houses === 5 ? '🏨' : '🏠'.repeat(prop.houses)}</span>}
-                  <span className="dim small"> rent ${rentFor(view, pos, 7)}</span>
-                </span>
-                <span className="row">
-                  {legalFor('BUILD', pos) && <button className="secondary" onClick={() => submitMove('BUILD', { position: pos })}>+🏠 ${sp.houseCost}</button>}
-                  {legalFor('SELL_HOUSE', pos) && <button className="ghost" onClick={() => submitMove('SELL_HOUSE', { position: pos })}>-🏠</button>}
-                  {legalFor('MORTGAGE', pos) && <button className="ghost" onClick={() => submitMove('MORTGAGE', { position: pos })}>Mortgage +${Math.floor(sp.price! / 2)}</button>}
-                  {legalFor('UNMORTGAGE', pos) && <button className="ghost" onClick={() => submitMove('UNMORTGAGE', { position: pos })}>Unmortgage ${Math.ceil(sp.price! * 0.55)}</button>}
-                </span>
-              </div>
+              <React.Fragment key={pos}>
+                <div className="row between">
+                  <span onClick={() => setOpenDeed(openDeed === pos ? null : pos)} style={{ cursor: 'pointer' }}>
+                    {sp.group && <span style={{ color: GROUP_HEX[sp.group] }}>■ </span>}
+                    {sp.name}
+                    {prop.mortgaged && <span className="dim small"> (mortgaged)</span>}
+                    {prop.houses > 0 && <span className="small"> {prop.houses === 5 ? '🏨' : '🏠'.repeat(prop.houses)}</span>}
+                    <span className="dim small"> rent ${rentFor(view, pos, 7)}</span>
+                  </span>
+                  <span className="row">
+                    {legalFor('BUILD', pos) && <button className="secondary" onClick={() => submitMove('BUILD', { position: pos })}>+🏠 ${sp.houseCost}</button>}
+                    {legalFor('SELL_HOUSE', pos) && <button className="ghost" onClick={() => submitMove('SELL_HOUSE', { position: pos })}>-🏠</button>}
+                    {legalFor('MORTGAGE', pos) && <button className="ghost" onClick={() => submitMove('MORTGAGE', { position: pos })}>Mortgage +${Math.floor(sp.price! / 2)}</button>}
+                    {legalFor('UNMORTGAGE', pos) && <button className="ghost" onClick={() => submitMove('UNMORTGAGE', { position: pos })}>Unmortgage ${Math.ceil(sp.price! * 0.55)}</button>}
+                  </span>
+                </div>
+                {openDeed === pos && (
+                  <div style={{ display: 'flex', justifyContent: 'center', margin: '8px 0' }}
+                    onClick={() => setOpenDeed(null)}>
+                    <div className="pop-in">
+                      <DeedCard pos={pos} view={view} summary={state.summary} width={230} />
+                    </div>
+                  </div>
+                )}
+              </React.Fragment>
             );
           })}
         </div>

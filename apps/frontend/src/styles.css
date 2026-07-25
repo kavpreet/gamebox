@@ -287,6 +287,76 @@ input:focus, select:focus {
   0% { transform: rotate(-160deg) scale(0.4); }
   100% { transform: rotate(0) scale(1); }
 }
+.die.tumbling { animation: die-tumble 0.14s linear infinite; }
+@keyframes die-tumble {
+  0% { transform: rotate(-8deg) translateY(-2px) scale(1.04); }
+  50% { transform: rotate(7deg) translateY(2px) scale(0.98); }
+  100% { transform: rotate(-8deg) translateY(-2px) scale(1.04); }
+}
+
+/* ── money motion: floating deltas + bills flying player↔player/bank ── */
+.cash-float {
+  position: absolute;
+  top: -4px;
+  right: 6px;
+  font-weight: 900;
+  font-size: 0.95rem;
+  pointer-events: none;
+  animation: cash-float 1.6s ease-out both;
+  text-shadow: 0 1px 3px rgba(3, 5, 16, 0.45);
+  z-index: 5;
+}
+.cash-float.gain { color: #2ee6a0; }
+.cash-float.loss { color: #ff6b6b; }
+@keyframes cash-float {
+  0% { opacity: 0; transform: translateY(8px) scale(0.8); }
+  18% { opacity: 1; transform: translateY(0) scale(1.15); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-26px) scale(1); }
+}
+.cash-fly {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 30;
+  pointer-events: none;
+  font-size: 28px;
+  filter: drop-shadow(0 3px 5px rgba(3, 5, 16, 0.5));
+  animation: cash-fly 0.95s cubic-bezier(0.35, 0.1, 0.45, 1) both;
+}
+@keyframes cash-fly {
+  0% { transform: translate(var(--fx), var(--fy)) scale(0.7) rotate(-12deg); opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { transform: translate(var(--tx), var(--ty)) scale(1.15) rotate(10deg); opacity: 0; }
+}
+
+/* ── board-card overlays (deed / chance / chest reveals over the TV board) ── */
+.board-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2vmin;
+  z-index: 20;
+  pointer-events: none;
+}
+.board-overlay .overlay-card {
+  animation: gb-flip 0.55s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+  filter: drop-shadow(0 14px 30px rgba(3, 5, 16, 0.55));
+}
+.board-overlay .overlay-caption {
+  background: rgba(10, 13, 30, 0.82);
+  color: #fff;
+  font-weight: 800;
+  padding: 6px 16px;
+  border-radius: 999px;
+  font-size: clamp(12px, 1.8vmin, 18px);
+  animation: fade-up 0.4s ease both;
+  animation-delay: 0.3s;
+}
 
 /* Card motion: draws fly into the hand, plays pop onto the discard,
    changed counters bump. Keyed remounts trigger these. */
@@ -501,6 +571,7 @@ input:focus, select:focus {
   gap: 1.2vmin;
 }
 .tv-player-chip {
+  position: relative;
   background: var(--bg-card);
   border: 1px solid var(--line);
   border-radius: 1.5vmin;
