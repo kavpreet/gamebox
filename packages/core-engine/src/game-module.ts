@@ -1,7 +1,13 @@
-import type { Seat, Viewer, DisconnectOption } from '@gamebox/shared-types';
+import type {
+  Seat,
+  Viewer,
+  DisconnectOption,
+  GameOptionDef,
+  GameOptions,
+} from '@gamebox/shared-types';
 import type { SeededRandom } from './rng.js';
 
-export type { Seat, Viewer };
+export type { Seat, Viewer, GameOptionDef, GameOptions };
 
 export interface GameState<TPublic, TPrivate> {
   public: TPublic;
@@ -43,7 +49,19 @@ export interface GameModule<TPublic = unknown, TPrivate = unknown, TMove = unkno
   maxPlayers: number;
   teams?: 'none' | 'optional' | 'required';
 
-  setup(seats: { seat: Seat; team?: number }[], rng: SeededRandom): GameState<TPublic, TPrivate>;
+  /**
+   * Alternate ("house") rules this module supports, declared as data so the
+   * lobby can render pickers and the server can validate choices without
+   * knowing anything about the game. The chosen values reach setup(); modules
+   * that need them later stash them in their own public state.
+   */
+  options?: readonly GameOptionDef[];
+
+  setup(
+    seats: { seat: Seat; team?: number }[],
+    rng: SeededRandom,
+    options: GameOptions,
+  ): GameState<TPublic, TPrivate>;
 
   /** Who may act right now — derived from state on every call, never a static flag. */
   activePlayers(state: GameState<TPublic, TPrivate>): Seat[];

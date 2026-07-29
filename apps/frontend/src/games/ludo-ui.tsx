@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { GameSummary } from '@gamebox/shared-types';
 import type { LudoPublic, LudoMove } from '@gamebox/game-ludo';
-import { HOME, SAFE_GLOBALS, globalSquare } from '@gamebox/game-ludo';
+import { HOME, SAFE_GLOBALS, globalSquare, destinationOf } from '@gamebox/game-ludo';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
 import {
   seatColor, SeatToken, SeatTokens, WinnerBanner, Prompt, Waiting, Die, EventLine, useBoardFit,
@@ -411,7 +411,7 @@ function describeMove(view: LudoPublic, seat: number, token: number): { label: s
   const die = view.die ?? 0;
   const p = view.tokens[seat]?.[token] ?? -1;
   if (p === -1) return { label: `Token ${token + 1} — 🏁 leave the yard`, capture: false };
-  const dest = p + die;
+  const dest = destinationOf(view, p, die) ?? p + die;
   if (dest === HOME) return { label: `Token ${token + 1} — 🏠 reach home!`, capture: false };
   if (dest > 50) return { label: `Token ${token + 1} — climb the home column`, capture: false };
   const destGlobal = globalSquare(view, seat, dest);

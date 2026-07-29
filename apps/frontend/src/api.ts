@@ -1,4 +1,4 @@
-import type { GameSummary, RoomDTO } from '@gamebox/shared-types';
+import type { GameOptionDef, GameOptionValue, GameSummary, RoomDTO } from '@gamebox/shared-types';
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -21,6 +21,8 @@ export interface GameTypeInfo {
   minPlayers: number;
   maxPlayers: number;
   teams: 'none' | 'optional' | 'required';
+  /** Alternate rules this game supports — rendered as the lobby's house-rules card. */
+  options: GameOptionDef[];
 }
 
 export interface AuthConfig {
@@ -37,6 +39,8 @@ export const api = {
   game: (id: string) => req<GameSummary>('GET', `/api/games/${id}`),
   setTeams: (id: string, teams: Record<number, number | null>) =>
     req<GameSummary>('POST', `/api/games/${id}/teams`, { teams }),
+  setOptions: (id: string, options: Record<string, GameOptionValue>) =>
+    req<GameSummary>('POST', `/api/games/${id}/options`, { options }),
   setAppearance: (id: string, color: string | null, icon: string | null) =>
     req<GameSummary>('POST', `/api/games/${id}/appearance`, { color, icon }),
   startGame: (id: string) => req<GameSummary>('POST', `/api/games/${id}/start`),

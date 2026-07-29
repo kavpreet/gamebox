@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import QRCode from 'qrcode';
 import type { RoomDTO } from '@gamebox/shared-types';
+import { describeNonDefaultOptions } from '@gamebox/shared-types';
 import { getSocket, emitAck } from '../socket.js';
 import { getGameUi } from '../games/registry.js';
 import type { LiveState } from '../games/types.js';
@@ -133,6 +134,18 @@ export function TvPage() {
             </div>
           ))}
         </div>
+        {(() => {
+          const houseRules = describeNonDefaultOptions(typeInfo?.options ?? [], state.summary.options ?? {});
+          if (houseRules.length === 0) return null;
+          return (
+            <div style={{ display: 'flex', gap: '1.4vmin', flexWrap: 'wrap', justifyContent: 'center', maxWidth: '72vmin' }}>
+              <span className="dim" style={{ fontSize: '2vmin' }}>house rules:</span>
+              {houseRules.map((r) => (
+                <span key={r} className="badge gold-badge" style={{ fontSize: '1.9vmin' }}>{r}</span>
+              ))}
+            </div>
+          );
+        })()}
       </div>
       </div>
     );

@@ -478,6 +478,11 @@ function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }
           })}
         </g>
       )}
+      {view.freeParkingPot > 0 && (
+        <text x={W / 2} y={7.45 * C} textAnchor="middle" fontSize={16} fill="#b8860b" fontWeight={900}>
+          🅿️ Free Parking jackpot: ${view.freeParkingPot}
+        </text>
+      )}
       {view.lastCard && (
         <text x={W / 2} y={7.9 * C} textAnchor="middle" fontSize={15} fill="#8a5200" fontWeight={800}>
           {view.lastCard}
