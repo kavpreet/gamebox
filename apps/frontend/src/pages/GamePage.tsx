@@ -9,6 +9,7 @@ import { getSocket, emitAck } from '../socket.js';
 import { getGameUi } from '../games/registry.js';
 import type { LiveState } from '../games/types.js';
 import { seatName, SeatDot } from '../games/common.js';
+import { HouseRules } from '../components/HouseRules.js';
 
 interface VoteUpdate {
   gameId: string;
@@ -372,6 +373,13 @@ function Lobby({ state, isHost, yourSeat }: { state: LiveState; isHost: boolean;
           {appearanceError && <p className="error small">{appearanceError}</p>}
         </div>
       )}
+
+      <HouseRules
+        gameId={gameId}
+        defs={typeInfo?.options ?? []}
+        options={summary.options}
+        isHost={isHost}
+      />
 
       {rooms.length > 0 && (
         <div className="card">

@@ -94,6 +94,7 @@ export function buildHttpApp(
         minPlayers: m.minPlayers,
         maxPlayers: m.maxPlayers,
         teams: m.teams ?? 'none',
+        options: m.options ?? [],
       })),
     );
   });
@@ -137,6 +138,17 @@ export function buildHttpApp(
   app.post('/api/games/:id/teams', requireUser, async (req, res, next) => {
     try {
       const summary = await games.setTeams(String(req.params.id), req.userId!, req.body.teams ?? {});
+      await onGameChanged(summary.id);
+      res.json(summary);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/games/:id/options', requireUser, async (req, res, next) => {
+    try {
+      const patch = (req.body.options ?? {}) as Record<string, unknown>;
+      const summary = await games.setOptions(String(req.params.id), req.userId!, patch);
       await onGameChanged(summary.id);
       res.json(summary);
     } catch (err) {

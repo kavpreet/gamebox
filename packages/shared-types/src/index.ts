@@ -39,6 +39,106 @@ export interface GameSummary {
   createdAt: string;
   updatedAt: string;
   players: SeatAssignment[];
+  /** Resolved house rules for this match (every option id the module declares). */
+  options: GameOptions;
+}
+
+// ── House rules (alternate/variant rules picked in the lobby) ───────────────
+
+/**
+ * Every table plays a little differently — out on a 1 in Ludo, stacking +2s in
+ * UNO, cash on Free Parking. Modules declare the variants they support as data;
+ * the lobby renders that declaration into controls, the server validates
+ * against it, and setup() receives the resolved values. Nothing about a
+ * specific game leaks into the engine or the lobby UI.
+ */
+export type GameOptionValue = boolean | string | number;
+export type GameOptions = Record<string, GameOptionValue>;
+
+interface GameOptionBase {
+  id: string;
+  label: string;
+  /** One-line explanation shown under the control. */
+  description?: string;
+}
+
+export interface ToggleOptionDef extends GameOptionBase {
+  kind: 'toggle';
+  default: boolean;
+}
+
+export interface ChoiceOptionDef extends GameOptionBase {
+  kind: 'choice';
+  default: string;
+  choices: readonly { value: string; label: string; description?: string }[];
+}
+
+export interface NumberOptionDef extends GameOptionBase {
+  kind: 'number';
+  default: number;
+  min: number;
+  max: number;
+  step?: number;
+  /** e.g. '$' — cosmetic only. */
+  prefix?: string;
+}
+
+export type GameOptionDef = ToggleOptionDef | ChoiceOptionDef | NumberOptionDef;
+
+/** Validate one value against its definition. Returns null when unusable. */
+export function coerceOptionValue(def: GameOptionDef, raw: unknown): GameOptionValue | null {
+  if (def.kind === 'toggle') {
+    return typeof raw === 'boolean' ? raw : null;
+  }
+  if (def.kind === 'choice') {
+    return typeof raw === 'string' && def.choices.some((c) => c.value === raw) ? raw : null;
+  }
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+  const step = def.step ?? 1;
+  const snapped = def.min + Math.round((raw - def.min) / step) * step;
+  const clamped = Math.min(def.max, Math.max(def.min, snapped));
+  return Number(clamped.toFixed(6));
+}
+
+export function defaultGameOptions(defs: readonly GameOptionDef[]): GameOptions {
+  const out: GameOptions = {};
+  for (const def of defs) out[def.id] = def.default;
+  return out;
+}
+
+/** Fill in defaults, drop unknown ids, repair invalid values. Always complete. */
+export function resolveGameOptions(
+  defs: readonly GameOptionDef[],
+  raw: unknown,
+): GameOptions {
+  const stored = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const out: GameOptions = {};
+  for (const def of defs) {
+    const value = coerceOptionValue(def, stored[def.id]);
+    out[def.id] = value === null ? def.default : value;
+  }
+  return out;
+}
+
+/** Human-readable summary of everything that differs from the standard rules. */
+export function describeNonDefaultOptions(
+  defs: readonly GameOptionDef[],
+  options: GameOptions,
+): string[] {
+  const out: string[] = [];
+  for (const def of defs) {
+    const value = options[def.id];
+    if (value === undefined || value === def.default) continue;
+    if (def.kind === 'toggle') {
+      out.push(value ? def.label : `No ${def.label.toLowerCase()}`);
+    } else if (def.kind === 'choice') {
+      const choice = def.choices.find((c) => c.value === value);
+      out.push(`${def.label}: ${choice?.label ?? value}`);
+    } else {
+      out.push(`${def.label}: ${def.prefix ?? ''}${value}`);
+    }
+  }
+  return out;
 }
 
 export interface RoomDTO {

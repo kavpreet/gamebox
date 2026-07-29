@@ -73,17 +73,20 @@ export async function migrateAppTables(db: Kysely<Database>): Promise<void> {
     .unique()
     .execute();
 
-  // Added after the initial release: player appearance (color/icon). Neither
-  // dialect's Kysely builder exposes a portable ADD COLUMN IF NOT EXISTS here,
-  // so this is idempotent by swallowing "column already exists" on rerun.
-  for (const col of ['color', 'icon'] as const) {
+  // Added after the initial release: player appearance (color/icon) and the
+  // game's chosen house rules. Neither dialect's Kysely builder exposes a
+  // portable ADD COLUMN IF NOT EXISTS here, so these are idempotent by
+  // swallowing "column already exists" on rerun.
+  const addColumn = async (table: 'game_players' | 'games', col: string) => {
     try {
-      await db.schema.alterTable('game_players').addColumn(col, 'text').execute();
+      await db.schema.alterTable(table).addColumn(col, 'text').execute();
     } catch (err) {
       const msg = String((err as Error).message ?? err).toLowerCase();
       if (!msg.includes('duplicate') && !msg.includes('already exists')) throw err;
     }
-  }
+  };
+  for (const col of ['color', 'icon']) await addColumn('game_players', col);
+  await addColumn('games', 'options');
 
   await db.schema
     .createTable('moves')

@@ -1,9 +1,12 @@
-import type { GameModule, GameState, Seat, SeededRandom } from '@gamebox/core-engine';
+import type { GameModule, GameOptions, GameState, Seat, SeededRandom } from '@gamebox/core-engine';
 import { IllegalMove } from '@gamebox/core-engine';
 import {
   BOARD, JAIL_POSITION, GO_SALARY, JAIL_FINE,
   CHANCE_CARDS, CHEST_CARDS, type Space,
 } from './board.js';
+
+/** The Free Parking square — where the house-rule jackpot piles up. */
+const FREE_PARKING_POSITION = BOARD.findIndex((s) => s.type === 'free-parking');
 
 /**
  * Monopoly — full ledger: buying, rent with houses/hotels, sealed-bid auctions
@@ -38,8 +41,30 @@ export interface Trade {
   getCash: number;
 }
 
+/** House rules, resolved from the lobby options at setup. */
+export interface MonopolyRules {
+  freeParking: boolean;
+  goDoubleOnLanding: boolean;
+  noAuctions: boolean;
+  jailRentFree: boolean;
+  startingCash: number;
+  goSalary: number;
+}
+
+export const MONOPOLY_STANDARD_RULES: MonopolyRules = {
+  freeParking: false,
+  goDoubleOnLanding: false,
+  noAuctions: false,
+  jailRentFree: false,
+  startingCash: 1500,
+  goSalary: GO_SALARY,
+};
+
 export interface MonopolyPublic {
   players: Record<Seat, MonopolyPlayer>;
+  rules: MonopolyRules;
+  /** house rule: fines and taxes pile up here until someone lands on Free Parking */
+  freeParkingPot: number;
   properties: Record<number, OwnedProperty>;
   order: Seat[];
   turnIndex: number;
@@ -120,12 +145,35 @@ export function rentFor(pub: MonopolyPublic, pos: number, diceTotal: number): nu
   return 0;
 }
 
+function rulesOf(pub: MonopolyPublic): MonopolyRules {
+  return pub.rules ?? MONOPOLY_STANDARD_RULES;
+}
+
+function monopolyRules(options: GameOptions): MonopolyRules {
+  const num = (id: string, fallback: number) =>
+    typeof options[id] === 'number' ? (options[id] as number) : fallback;
+  return {
+    freeParking: options.freeParking === true,
+    goDoubleOnLanding: options.goDoubleOnLanding === true,
+    noAuctions: options.noAuctions === true,
+    jailRentFree: options.jailRentFree === true,
+    startingCash: num('startingCash', 1500),
+    goSalary: num('goSalary', GO_SALARY),
+  };
+}
+
+/** Money leaving the game: to the bank normally, to the Free Parking pot under house rules. */
+function payBank(pub: MonopolyPublic, amount: number): void {
+  if (rulesOf(pub).freeParking) pub.freeParkingPot += amount;
+}
+
 /** Transfer `amount` from seat; enter DEBT phase when cash is short. */
 function charge(pub: MonopolyPublic, seat: Seat, amount: number, creditor: Seat | null): void {
   const p = pub.players[seat]!;
   if (p.cash >= amount) {
     p.cash -= amount;
     if (creditor !== null) pub.players[creditor]!.cash += amount;
+    else payBank(pub, amount);
   } else {
     pub.debt = { seat, amount, creditor };
     pub.phase = 'DEBT';
@@ -155,7 +203,7 @@ function drawCard(pub: MonopolyPublic, seat: Seat, deck: 'chance' | 'chest', rng
     if (e.amount >= 0) credit(pub, seat, e.amount);
     else charge(pub, seat, -e.amount, null);
   } else if (e.kind === 'move-to') {
-    if (e.position < p.position) credit(pub, seat, GO_SALARY); // passed GO
+    if (e.position < p.position) credit(pub, seat, rulesOf(pub).goSalary); // passed GO
     p.position = e.position;
     resolveLanding(pub, seat, rng, diceTotal);
   } else if (e.kind === 'go-to-jail') {
@@ -181,6 +229,7 @@ function drawCard(pub: MonopolyPublic, seat: Seat, deck: 'chance' | 'chest', rng
 
 function resolveLanding(pub: MonopolyPublic, seat: Seat, rng: SeededRandom, diceTotal: number): void {
   const p = pub.players[seat]!;
+  const rules = rulesOf(pub);
   const sp = space(p.position);
   switch (sp.type) {
     case 'street':
@@ -190,12 +239,30 @@ function resolveLanding(pub: MonopolyPublic, seat: Seat, rng: SeededRandom, dice
       if (!prop) {
         pub.pendingBuy = p.position;
       } else if (prop.owner !== seat && !prop.mortgaged) {
+        // House rule: a landlord sitting in jail collects nothing.
+        if (rules.jailRentFree && pub.players[prop.owner]!.inJail) {
+          pub.lastEvent = `${sp.name}'s owner is in jail — rent free!`;
+          break;
+        }
         const rent = rentFor(pub, p.position, diceTotal);
         pub.lastEvent = `owes $${rent} rent on ${sp.name}`;
         charge(pub, seat, rent, prop.owner);
       }
       break;
     }
+    case 'free-parking':
+      if (rules.freeParking && pub.freeParkingPot > 0) {
+        pub.lastEvent = `scooped the $${pub.freeParkingPot} Free Parking jackpot!`;
+        credit(pub, seat, pub.freeParkingPot);
+        pub.freeParkingPot = 0;
+      }
+      break;
+    case 'go':
+      if (rules.goDoubleOnLanding) {
+        pub.lastEvent = `landed right on GO — double salary, $${rules.goSalary}!`;
+        credit(pub, seat, rules.goSalary);
+      }
+      break;
     case 'tax':
       pub.lastEvent = `pays ${sp.name} $${sp.taxAmount}`;
       charge(pub, seat, sp.taxAmount!, null);
@@ -276,21 +343,82 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
   slug: 'monopoly',
   displayName: 'Monopoly',
   description: 'Buy, build, and bankrupt your friends around the board.',
-  rulesVersion: '1.0.0',
+  rulesVersion: '1.1.0',
   minPlayers: 2,
   maxPlayers: 6,
   teams: 'none',
 
-  setup(seats) {
+  options: [
+    {
+      id: 'freeParking',
+      kind: 'toggle',
+      label: 'Free Parking jackpot',
+      description: 'Every tax and fine piles up in the middle — land on Free Parking and take the lot.',
+      default: false,
+    },
+    {
+      id: 'goDoubleOnLanding',
+      kind: 'toggle',
+      label: 'Double on GO',
+      description: 'Landing exactly on GO pays your salary twice.',
+      default: false,
+    },
+    {
+      id: 'noAuctions',
+      kind: 'toggle',
+      label: 'No auctions',
+      description: 'Decline a property and it simply stays on the market.',
+      default: false,
+    },
+    {
+      id: 'jailRentFree',
+      kind: 'toggle',
+      label: 'No rent from jail',
+      description: 'Landlords in jail collect nothing while they sit there.',
+      default: false,
+    },
+    {
+      id: 'startingCash',
+      kind: 'number',
+      label: 'Starting cash',
+      description: 'Bigger banks mean longer, friendlier games.',
+      default: 1500,
+      min: 500,
+      max: 5000,
+      step: 100,
+      prefix: '$',
+    },
+    {
+      id: 'goSalary',
+      kind: 'number',
+      label: 'Salary for passing GO',
+      default: GO_SALARY,
+      min: 100,
+      max: 1000,
+      step: 50,
+      prefix: '$',
+    },
+  ],
+
+  setup(seats, _rng, options) {
     const players: Record<Seat, MonopolyPlayer> = {};
     const priv: Record<Seat, MonopolyPrivate> = {};
+    const rules = monopolyRules(options);
     for (const { seat } of seats) {
-      players[seat] = { cash: 1500, position: 0, inJail: false, jailTurns: 0, bankrupt: false };
+      players[seat] = {
+        cash: rules.startingCash,
+        position: 0,
+        inJail: false,
+        jailTurns: 0,
+        bankrupt: false,
+      };
       priv[seat] = {};
     }
     return {
       public: {
         players,
+        rules,
+        freeParkingPot: 0,
         properties: {},
         order: seats.map((s) => s.seat),
         turnIndex: 0,
@@ -377,7 +505,7 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
         const total = d1 + d2;
         const before = p.position;
         p.position = (p.position + total) % BOARD.length;
-        if (p.position < before) credit(pub, seat, GO_SALARY);
+        if (p.position < before) credit(pub, seat, rulesOf(pub).goSalary);
         resolveLanding(pub, seat, rng, total);
         if (pub.phase === 'ROLL') pub.phase = 'ACT';
       }
@@ -401,6 +529,12 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       const pub = state.public;
       requireManagement(pub, seat);
       if (pub.pendingBuy === null) throw new IllegalMove('Nothing to decline');
+      // House rule: no auctions — the property just stays unsold.
+      if (rulesOf(pub).noAuctions) {
+        pub.lastEvent = `passed on ${space(pub.pendingBuy).name}`;
+        pub.pendingBuy = null;
+        return;
+      }
       pub.auction = { position: pub.pendingBuy, bids: {} };
       pub.pendingBuy = null;
       pub.phase = 'AUCTION';
@@ -593,6 +727,7 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       if (p.cash < debt.amount) throw new IllegalMove('Still not enough — mortgage or sell, or declare bankruptcy');
       p.cash -= debt.amount;
       if (debt.creditor !== null) credit(pub, debt.creditor, debt.amount);
+      else payBank(pub, debt.amount);
       pub.debt = null;
       pub.phase = 'ACT';
       pub.lastEvent = 'settled the debt';

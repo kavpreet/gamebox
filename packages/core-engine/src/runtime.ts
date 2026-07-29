@@ -1,4 +1,5 @@
-import type { Seat, Viewer, GameStatus, DisconnectOption } from '@gamebox/shared-types';
+import type { Seat, Viewer, GameStatus, DisconnectOption, GameOptions } from '@gamebox/shared-types';
+import { resolveGameOptions } from '@gamebox/shared-types';
 import type { GameModule, GameState, EndResult } from './game-module.js';
 import { IllegalMove } from './game-module.js';
 import { createSeededRandom, type SeededRandom } from './rng.js';
@@ -61,9 +62,10 @@ export class GameRuntime {
     module: GameModule<any, any, any>,
     seats: { seat: Seat; team?: number }[],
     seed: number,
+    options: GameOptions = {},
   ): GameRuntime {
     const rng = createSeededRandom(seed);
-    const state = module.setup(seats, rng);
+    const state = module.setup(seats, rng, resolveGameOptions(module.options ?? [], options));
     return new GameRuntime(module, {
       state,
       rngState: rng.getState(),

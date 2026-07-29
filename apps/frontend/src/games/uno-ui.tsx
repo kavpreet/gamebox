@@ -169,6 +169,11 @@ function TvView({ state }: TvViewProps<UnoView>) {
           )}
           <div style={{ fontSize: '5vmin' }}>{view.direction === 1 ? '↻' : '↺'}</div>
         </div>
+        {view.pendingDraw > 0 && (
+          <div key={view.pendingDraw} className="badge gold-badge count-bump" style={{ fontSize: '2.6vmin' }}>
+            🔥 +{view.pendingDraw} stacked — {seatName(state.summary, turnSeat)} must stack or take them
+          </div>
+        )}
         {view.currentColor && (
           <div style={{ fontSize: '2.4vmin' }}>
             Color:{' '}
@@ -219,6 +224,7 @@ function TvView({ state }: TvViewProps<UnoView>) {
 function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<UnoView, UnoMove>) {
   const view = state.view;
   const [wildIdx, setWildIdx] = useState<number | null>(null);
+  const [swapIdx, setSwapIdx] = useState<number | null>(null);
   const prevHandLen = useRef<number>(view?.hand?.length ?? 0);
   if (!view) return null;
   const dark = view.side === 'dark';
@@ -231,6 +237,10 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<UnoView, Un
   const canPass = legal.some((m) => m.kind === 'PASS');
   const canDeclare = legal.some((m) => m.kind === 'DECLARE_UNO');
   const targets = catchTargets(view, yourSeat);
+  // House rules: an out-of-turn jump-in is a legal PLAY while it isn't your
+  // turn; a live draw stack means your only choices are stack or eat it.
+  const canJumpIn = !myTurn && playableIdx.size > 0 && state.status === 'active';
+  const owedByMe = myTurn && view.pendingDraw > 0;
 
   // deal-in animation: cards appended since the last render fly in
   const handLen = view.hand?.length ?? 0;
@@ -240,6 +250,8 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<UnoView, Un
   const play = (idx: number, face: Face) => {
     if (face.color === 'W') {
       setWildIdx(idx);
+    } else if (view.rules?.sevenZero && face.value === '7' && view.order.length > 2) {
+      setSwapIdx(idx); // 7 swaps hands — with whom?
     } else {
       submitMove('PLAY', { card: idx });
     }
@@ -290,12 +302,27 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<UnoView, Un
           </div>
         )}
 
+        {view.pendingDraw > 0 && (
+          <div className="badge gold-badge" style={{ fontSize: '1rem', padding: '0.4em 1em' }}>
+            🔥 +{view.pendingDraw} stacked on {seatName(state.summary, turnSeat)}
+          </div>
+        )}
+
         {state.status === 'completed' ? (
           <WinnerBanner state={state} />
         ) : myTurn ? (
-          <Prompt>{view.phase === 'PLAY_DRAWN_OR_PASS' ? 'Play the drawn card or pass' : 'Your turn!'}</Prompt>
+          <Prompt>
+            {owedByMe
+              ? `Stack another ${view.pendingDrawValue?.startsWith('draw') || view.pendingDrawValue?.startsWith('wild') ? 'draw card' : 'card'} or take ${view.pendingDraw}`
+              : view.phase === 'PLAY_DRAWN_OR_PASS'
+                ? 'Play the drawn card or pass'
+                : 'Your turn!'}
+          </Prompt>
         ) : (
-          <p className="waiting">Waiting for {seatName(state.summary, turnSeat)}</p>
+          <>
+            <p className="waiting">Waiting for {seatName(state.summary, turnSeat)}</p>
+            {canJumpIn && <p className="dim small">You hold that exact card — jump in!</p>}
+          </>
         )}
         {view.lastEvent && <p className="event-line" key={`${view.lastEvent}-${view.discardCount}-${view.drawPileSize}`}>{eventText(view, state.summary)}</p>}
       </div>
@@ -306,7 +333,9 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<UnoView, Un
             <h3>Your hand ({view.hand.length})</h3>
             <div className="row">
               {myTurn && canDraw && (
-                <button className="secondary" onClick={() => submitMove('DRAW', {})}>Draw</button>
+                <button className={owedByMe ? '' : 'secondary'} onClick={() => submitMove('DRAW', {})}>
+                  {owedByMe ? `Take ${view.pendingDraw}` : 'Draw'}
+                </button>
               )}
               {myTurn && canPass && (
                 <button className="secondary" onClick={() => submitMove('PASS', {})}>Pass</button>
@@ -320,8 +349,8 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<UnoView, Un
                 face={face}
                 side={view.side}
                 dealIn={idx >= dealtFrom}
-                onClick={myTurn ? () => play(idx, face) : undefined}
-                disabled={myTurn && !playableIdx.has(idx)}
+                onClick={myTurn || canJumpIn ? () => play(idx, face) : undefined}
+                disabled={(myTurn || canJumpIn) && !playableIdx.has(idx)}
               />
             ))}
           </div>
@@ -338,6 +367,28 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<UnoView, Un
             </div>
           ))}
           <p className="dim small">These are the flip sides of the cards they hold — plan your ⟲ flips!</p>
+        </div>
+      )}
+
+      {swapIdx !== null && (
+        <div className="overlay" onClick={() => setSwapIdx(null)}>
+          <div className="card" onClick={(e) => e.stopPropagation()}>
+            <h3>Swap hands with…</h3>
+            <p className="dim small">You'll trade your whole hand for theirs.</p>
+            {view.order.filter((s) => s !== yourSeat).map((s) => (
+              <button
+                key={s}
+                className="secondary"
+                onClick={() => {
+                  submitMove('PLAY', { card: swapIdx, swapWith: s });
+                  setSwapIdx(null);
+                }}
+              >
+                {seatName(state.summary, s)} ({view.handCounts[s] ?? 0} cards)
+              </button>
+            ))}
+            <button className="ghost" onClick={() => setSwapIdx(null)}>Cancel</button>
+          </div>
         </div>
       )}
 

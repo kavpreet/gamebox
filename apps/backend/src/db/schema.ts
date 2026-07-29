@@ -24,6 +24,8 @@ export interface GamesTable {
   version: number; // optimistic-concurrency counter == last move seq
   current_state: string; // JSON RuntimeSnapshot (server-only, never sent raw)
   final_result: string | null; // JSON EndResult
+  /** JSON GameOptions — the house rules picked in the lobby (null = all defaults) */
+  options: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;

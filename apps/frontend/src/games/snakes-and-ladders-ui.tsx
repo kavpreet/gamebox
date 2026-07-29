@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { GameSummary } from '@gamebox/shared-types';
 import type { SnlPublic } from '@gamebox/game-snakes-and-ladders';
-import { SNAKES, LADDERS } from '@gamebox/game-snakes-and-ladders';
+import { CLASSIC } from '@gamebox/game-snakes-and-ladders';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
 import {
   seatName, SeatDot, SeatToken, SeatTokens, WinnerBanner, Prompt, Waiting, Die, useBoardFit,
@@ -134,11 +134,15 @@ function useTokenAnimation(lastRoll: SnlPublic['lastRoll']): { anim: AnimState |
 function Board({ view, summary, size = '100%' }: { view: SnlPublic; summary: GameSummary; size?: string }) {
   const W = PAD * 2 + CELL * 10;
   const { anim, fx } = useTokenAnimation(view.lastRoll);
+  // The layout travels in state — this match may be on any of the alternate
+  // boards (or a randomly generated one).
+  const snakes = view.layout?.snakes ?? CLASSIC.snakes;
+  const ladders = view.layout?.ladders ?? CLASSIC.ladders;
   const cells = [];
   for (let sq = 1; sq <= 100; sq++) {
     const { x, y } = squareXY(sq);
-    const isSnakeHead = SNAKES[sq] !== undefined;
-    const isLadderFoot = LADDERS[sq] !== undefined;
+    const isSnakeHead = snakes[sq] !== undefined;
+    const isLadderFoot = ladders[sq] !== undefined;
     cells.push(
       <g key={sq}>
         <rect
@@ -160,7 +164,7 @@ function Board({ view, summary, size = '100%' }: { view: SnlPublic; summary: Gam
   }
 
   const links = [];
-  for (const [fromStr, to] of Object.entries(LADDERS)) {
+  for (const [fromStr, to] of Object.entries(ladders)) {
     const a = squareXY(Number(fromStr));
     const b = squareXY(to);
     const dx = b.x - a.x, dy = b.y - a.y;
@@ -179,7 +183,7 @@ function Board({ view, summary, size = '100%' }: { view: SnlPublic; summary: Gam
       </g>,
     );
   }
-  for (const [fromStr, to] of Object.entries(SNAKES)) {
+  for (const [fromStr, to] of Object.entries(snakes)) {
     const a = squareXY(Number(fromStr)); // head
     const b = squareXY(to); // tail
     const dx = b.x - a.x, dy = b.y - a.y;
@@ -266,6 +270,17 @@ function Board({ view, summary, size = '100%' }: { view: SnlPublic; summary: Gam
   );
 }
 
+/** What just happened, including the house-rule outcomes (bumps, stuck at start). */
+function rollSuffix(view: SnlPublic, summary: GameSummary): string {
+  const roll = view.lastRoll;
+  if (!roll) return '';
+  if (roll.slide !== null) return roll.slide < roll.to ? ' — snake! 🐍' : ' — ladder! 🪜';
+  if (roll.bumped !== null) return ` — bumped ${seatName(summary, roll.bumped)} back to the start! 💥`;
+  if (roll.from === 0 && roll.to === 0) return ' — still stuck at the start';
+  if (roll.from === roll.to) return ' — overshot, no move';
+  return '';
+}
+
 function TvView({ state }: TvViewProps<SnlPublic>) {
   const view = state.view;
   if (!view) return null;
@@ -279,7 +294,7 @@ function TvView({ state }: TvViewProps<SnlPublic>) {
         {view.lastRoll && (
           <div className="tv-player-chip">
             🎲 {seatName(state.summary, view.lastRoll.seat)} rolled a {view.lastRoll.die}
-            {view.lastRoll.slide !== null && (view.lastRoll.slide < view.lastRoll.to ? ' — snake!' : ' — ladder!')}
+            {rollSuffix(view, state.summary)}
           </div>
         )}
         <WinnerBanner state={state} />
@@ -319,7 +334,7 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<SnlPublic, 
             </div>
             <p className="dim">
               {seatName(state.summary, view.lastRoll.seat)} rolled a {view.lastRoll.die}
-              {view.lastRoll.slide !== null && (view.lastRoll.slide < view.lastRoll.to ? ' — down a snake 🐍' : ' — up a ladder 🪜')}
+              {rollSuffix(view, state.summary)}
             </p>
           </>
         )}
