@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { PictionaryPublic, PictionaryMove, Stroke } from '@gamebox/game-pictionary';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
+import { TableLog } from './chrome.js';
 import { seatName, SeatDot, WinnerBanner, Prompt } from './common.js';
 
 type PictionaryView = PictionaryPublic & { word: string | null };
@@ -151,6 +152,7 @@ function TvView({ state }: TvViewProps<PictionaryView>) {
         ))}
         <GuessFeed view={view} summary={state.summary} limit={10} />
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );

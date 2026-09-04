@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { ScattergoriesPublic, ScattergoriesMove } from '@gamebox/game-scattergories';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
+import { TableLog } from './chrome.js';
 import { seatName, SeatDot, WinnerBanner } from './common.js';
 
 type ScatView = ScattergoriesPublic & { yourAnswers: string[] | null };
@@ -79,6 +80,7 @@ function TvView({ state }: TvViewProps<ScatView>) {
       <div className="tv-sidebar">
         <Scoreboard view={view} state={state} />
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );

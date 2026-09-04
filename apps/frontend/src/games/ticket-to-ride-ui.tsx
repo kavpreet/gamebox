@@ -3,7 +3,7 @@ import type { GameSummary } from '@gamebox/shared-types';
 import type { TtrPublic, TtrMove, Card, TicketView, TrainColor, TtrMapDef } from '@gamebox/game-ticket-to-ride';
 import { MAPS } from '@gamebox/game-ticket-to-ride';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { TableStage } from './chrome.js';
+import { TableStage, TableLog } from './chrome.js';
 import { seatName, seatColor, SeatDot, WinnerBanner, Prompt, Waiting, useBoardFit, FxDefs, RebirthPulse } from './common.js';
 
 type TtrView = TtrPublic & {
@@ -276,6 +276,7 @@ function TvView({ state }: TvViewProps<TtrView>) {
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
             <LogPanel view={view} summary={state.summary} limit={10} fontSize="1.8vmin" />
           </div>
+          <TableLog />
         </div>
       </div>
     </div>

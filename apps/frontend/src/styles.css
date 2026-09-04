@@ -837,3 +837,63 @@ input:focus, select:focus {
 .seat-border-3 { border-left-color: #7c5cff; }
 .seat-border-4 { border-left-color: #3fa7ff; }
 .seat-border-5 { border-left-color: #9ad14b; }
+
+/* ── Table log: what just happened, in the TV sidebar ──────────────────────
+   Replaces the floating toast on the big screen. It sits directly beneath the
+   player chips rather than being pinned to the bottom of the column: the log
+   is about those players, and a gap between the two reads as an unrelated
+   panel that happens to be nearby. */
+.table-log {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5vmin;
+  padding: 1vmin 1.1vmin;
+  border-radius: 12px;
+  background: rgba(10, 13, 30, 0.55);
+  border: 1px solid var(--line);
+  /* Never let a long run of beats push the player chips off screen. */
+  max-height: 34vmin;
+  overflow: hidden;
+}
+
+.table-log-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7vmin;
+  /* Big enough to read across a room, and it is the newest line that matters. */
+  font-size: 1.75vmin;
+  line-height: 1.35;
+  transition: opacity 400ms ease;
+}
+.table-log-line:first-child {
+  font-size: 2vmin;
+  font-weight: 600;
+}
+.table-log-line .token {
+  flex: none;
+  width: 1.1vmin;
+  height: 1.1vmin;
+  border-radius: 50%;
+  align-self: center;
+}
+.table-log-text { flex: 1; min-width: 0; }
+
+/* The newest line arrives rather than blinking into place. */
+.table-log-line:first-child { animation: log-in 320ms cubic-bezier(0.2, 1.2, 0.4, 1); }
+@keyframes log-in {
+  from { opacity: 0; transform: translateY(-0.5vmin); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Kind-coded left edge, matching the toast's colour language. */
+.table-log-line.beat-money   { color: #b6e37a; }
+.table-log-line.beat-card    { color: #ffcf74; }
+.table-log-line.beat-jail,
+.table-log-line.beat-capture { color: #ff9db0; }
+.table-log-line.beat-dice    { color: #9ecbff; }
+.table-log-line.beat-reveal  { color: #d9c7ff; }
+
+@media (prefers-reduced-motion: reduce) {
+  .table-log-line:first-child { animation: none !important; }
+  .table-log-line { transition: none !important; }
+}

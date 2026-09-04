@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { ChessPublic, ChessMove } from '@gamebox/game-chess';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { TableStage } from './chrome.js';
+import { TableStage, TableLog } from './chrome.js';
 import { SeatTokens, WinnerBanner, Prompt, Waiting, useHandMove, HandGlyph, FxDefs, CaptureBlast, useRecentChange, useBoardFit } from './common.js';
 
 const PIECES: Record<string, string> = {
@@ -160,6 +160,7 @@ function TvView({ state }: TvViewProps<ChessPublic>) {
         )}
         {view.result === 'draw' && <div className="tv-player-chip active">Draw — {view.resultReason}</div>}
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );

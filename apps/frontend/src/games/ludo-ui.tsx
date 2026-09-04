@@ -3,7 +3,7 @@ import type { GameSummary } from '@gamebox/shared-types';
 import type { LudoPublic, LudoMove } from '@gamebox/game-ludo';
 import { HOME, SAFE_GLOBALS, globalSquare, destinationOf } from '@gamebox/game-ludo';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { TableStage } from './chrome.js';
+import { TableStage, TableLog } from './chrome.js';
 import {
   seatColor, SeatToken, SeatTokens, WinnerBanner, Prompt, Waiting, Die, EventLine, useBoardFit,
   FxDefs, HandGlyph, CaptureBlast, RebirthPulse, type HandPhase,
@@ -404,6 +404,7 @@ function TvView({ state }: TvViewProps<LudoPublic>) {
         )}
         {view.lastEvent && <div className="tv-player-chip dim">{view.lastEvent}</div>}
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );

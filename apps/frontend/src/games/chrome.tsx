@@ -11,7 +11,18 @@ import { useTable } from './table.js';
  * Rendered by the page rather than by each game UI, so a board that hasn't
  * been taught about beats still narrates its moves.
  */
-export function TableChrome({ showSoundGate = false }: { showSoundGate?: boolean }) {
+export function TableChrome({
+  showSoundGate = false,
+  banner = true,
+}: {
+  showSoundGate?: boolean;
+  /**
+   * The floating narration toast. On by default for phones; the TV turns it
+   * off and uses <TableLog> in the sidebar instead, where a line can sit long
+   * enough to actually be read from a sofa.
+   */
+  banner?: boolean;
+}) {
   const { beats, options, nameOf } = useTable();
   // Money is the change players most often failed to notice, so when a money
   // beat is on screen the amount also flies up over the board.
@@ -20,9 +31,43 @@ export function TableChrome({ showSoundGate = false }: { showSoundGate?: boolean
   return (
     <>
       {options.animate && amount !== 0 && <CashFly key={money!.id} amount={amount} />}
-      {options.animate && <BeatBanner player={beats} nameOf={nameOf} />}
+      {banner && options.animate && <BeatBanner player={beats} nameOf={nameOf} />}
       {showSoundGate && <SoundGate wanted={options.sound} />}
     </>
+  );
+}
+
+/**
+ * What has just happened, as a standing list rather than a passing toast.
+ *
+ * The floating banner was tuned for a phone in your hand: it appears, it goes,
+ * and if you were looking at the board you missed it. On a TV across a room
+ * that is exactly the wrong shape — so the same beats land here, in the
+ * sidebar under the players, and stay until newer ones push them out. Newest
+ * first, because that is where the eye goes back to.
+ */
+export function TableLog({ limit = 6 }: { limit?: number }) {
+  const { beats, nameOf } = useTable();
+  const items = beats.recent.slice(-limit).reverse();
+  if (items.length === 0) return null;
+  return (
+    <div className="table-log" role="log" aria-live="polite">
+      {items.map((b, i) => (
+        <div
+          key={b.id}
+          className={`table-log-line beat-${b.kind}`}
+          // Older lines recede rather than vanish, so the newest reads first
+          // without the rest disappearing out from under anyone still reading.
+          style={{ opacity: Math.max(0.32, 1 - i * 0.16) }}
+        >
+          {b.seat !== null && <span className={`token seat-color-${b.seat % 6}`} />}
+          <span className="table-log-text">
+            {b.seat !== null && <strong>{nameOf(b.seat)} </strong>}
+            {b.text}
+          </span>
+        </div>
+      ))}
+    </div>
   );
 }
 

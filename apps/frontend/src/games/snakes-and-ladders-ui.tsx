@@ -3,7 +3,7 @@ import type { GameSummary } from '@gamebox/shared-types';
 import type { SnlPublic, SnlMove } from '@gamebox/game-snakes-and-ladders';
 import { CLASSIC } from '@gamebox/game-snakes-and-ladders';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { TableStage } from './chrome.js';
+import { TableStage, TableLog } from './chrome.js';
 import { useTable } from './table.js';
 import { ClockRing } from './anim.js';
 import {
@@ -303,6 +303,7 @@ function TvView({ state }: TvViewProps<SnlPublic>) {
           </div>
         )}
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );

@@ -4,7 +4,7 @@ import {
   cornersOf, hexCenter, vertexXY, edgeVertices, hexKey, RESOURCES,
 } from '@gamebox/game-catan';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { TableStage } from './chrome.js';
+import { TableStage, TableLog } from './chrome.js';
 import type { GameSummary } from '@gamebox/shared-types';
 import {
   seatName, seatColor, SeatDot, WinnerBanner, Prompt, Waiting, EventLine, useBoardFit,
@@ -249,6 +249,7 @@ function TvView({ state }: TvViewProps<CatanView>) {
         {view.phase === 'SETUP' && <div className="tv-player-chip dim">initial placement…</div>}
         {view.lastEvent && <div className="tv-player-chip dim small">{view.lastEvent}</div>}
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );

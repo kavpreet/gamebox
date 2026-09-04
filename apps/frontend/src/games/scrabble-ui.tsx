@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import type { ScrabblePublic, ScrabbleMove, BoardCell } from '@gamebox/game-scrabble';
 import { premiumAt, LETTER_VALUES, BOARD_SIZE, CENTER } from '@gamebox/game-scrabble';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
+import { TableLog } from './chrome.js';
 import { SeatDot, WinnerBanner, Prompt, Waiting, EventLine } from './common.js';
 
 type ScrabbleView = ScrabblePublic & { rack: string[] | null };
@@ -146,6 +147,7 @@ function TvView({ state }: TvViewProps<ScrabbleView>) {
         <p className="dim small">Bag: {view.bagSize} tiles</p>
         {view.lastEvent && <p className="dim small">{view.lastEvent}</p>}
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );

@@ -3,7 +3,7 @@ import type { GameSummary } from '@gamebox/shared-types';
 import type { CCPublic, CCMove } from '@gamebox/game-chinese-checkers';
 import { allCells, destinations } from '@gamebox/game-chinese-checkers';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { TableStage } from './chrome.js';
+import { TableStage, TableLog } from './chrome.js';
 import { seatName, SeatToken, SeatTokens, WinnerBanner, Prompt, Waiting, useHandMove, HandGlyph, FxDefs, useBoardFit } from './common.js';
 
 const R = 16; // hole radius in svg units
@@ -117,6 +117,7 @@ function TvView({ state }: TvViewProps<CCPublic>) {
           </div>
         )}
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );

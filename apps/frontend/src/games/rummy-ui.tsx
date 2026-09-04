@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { RummyPublic, RummyMove, Card, Meld } from '@gamebox/game-rummy';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
+import { TableLog } from './chrome.js';
 import { seatName, SeatDot, WinnerBanner, Prompt, Waiting, EventLine } from './common.js';
 
 type RummyView = RummyPublic & { hand: Card[] | null };
@@ -110,6 +111,7 @@ function TvView({ state }: TvViewProps<RummyView>) {
             </div>
           ))}
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );

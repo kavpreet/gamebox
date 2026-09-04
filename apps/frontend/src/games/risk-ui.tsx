@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import type { RiskPublic, RiskMove } from '@gamebox/game-risk';
 import { ADJACENCY } from '@gamebox/game-risk';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { TableStage } from './chrome.js';
+import { TableStage, TableLog } from './chrome.js';
 import type { GameSummary } from '@gamebox/shared-types';
 import {
   seatName, seatColor, SeatTokens, WinnerBanner, Prompt, Waiting, useBoardFit,
@@ -169,6 +169,7 @@ function TvView({ state }: TvViewProps<RiskPublic>) {
           </div>
         )}
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );
