@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { ClockMode, GameOptions } from '@gamebox/shared-types';
-import { DEFAULT_GAME_OPTIONS } from '@gamebox/shared-types';
+import type { ClockMode, TableOptions } from '@gamebox/shared-types';
+import { DEFAULT_TABLE_OPTIONS } from '@gamebox/shared-types';
 import { api, type GameTypeInfo } from '../api.js';
 
 /**
@@ -21,24 +21,24 @@ export function TableSettings({
   typeInfo: GameTypeInfo | undefined;
   isHost: boolean;
 }) {
-  const [opts, setOpts] = useState<GameOptions | null>(null);
+  const [opts, setOpts] = useState<TableOptions | null>(null);
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     api
-      .gameOptions(gameId)
+      .tableOptions(gameId)
       .then(setOpts)
-      .catch(() => setOpts({ ...DEFAULT_GAME_OPTIONS }));
+      .catch(() => setOpts({ ...DEFAULT_TABLE_OPTIONS }));
   }, [gameId]);
 
   if (!opts) return null;
 
-  const save = async (patch: Partial<GameOptions>) => {
+  const save = async (patch: Partial<TableOptions>) => {
     const optimistic = { ...opts, ...patch };
     setOpts(optimistic); // the toggles must feel instant; the server reconciles
     try {
-      setOpts(await api.setGameOptions(gameId, patch));
+      setOpts(await api.setTableOptions(gameId, patch));
       setError('');
     } catch (err) {
       setOpts(opts);

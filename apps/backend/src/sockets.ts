@@ -99,7 +99,8 @@ export function setupSockets(
       // so it never replays a story it already missed.
       beats,
       clock: runtime?.clock() ?? null,
-      options: runtime?.gameOptions ?? (await games.getOptions(gameId).catch(() => undefined)),
+      // How the table is played. The house rules ride along on `summary`.
+      table: runtime?.tableOptions ?? (await games.getTableOptions(gameId).catch(() => undefined)),
     };
 
     armClock(gameId, runtime);

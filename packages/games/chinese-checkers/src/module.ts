@@ -130,6 +130,7 @@ function hasWon(pub: CCPublic, seat: Seat): boolean {
 export const chineseCheckers: GameModule<CCPublic, CCPrivate, CCMove> = {
   slug: 'chinese-checkers',
   displayName: 'Chinese Checkers',
+  description: 'Hop your pegs across the star to the opposite point first.',
   rulesVersion: '1.0.0',
   minPlayers: 2,
   maxPlayers: 6,

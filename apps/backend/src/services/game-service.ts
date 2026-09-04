@@ -6,8 +6,22 @@ import {
   type GameModule,
   type RuntimeSnapshot,
 } from '@gamebox/core-engine';
-import type { GameStatus, Seat, GameSummary, SeatAssignment, GameOptions } from '@gamebox/shared-types';
-import { DEFAULT_GAME_OPTIONS, normalizeGameOptions } from '@gamebox/shared-types';
+import {
+  coerceOptionValue,
+  defaultGameOptions,
+  defaultSeatColor,
+  isValidSeatColor,
+  isValidSeatIcon,
+  resolveGameOptions,
+  DEFAULT_TABLE_OPTIONS,
+  normalizeTableOptions,
+  type GameOptions,
+  type GameStatus,
+  type Seat,
+  type GameSummary,
+  type SeatAssignment,
+  type TableOptions,
+} from '@gamebox/shared-types';
 import type { Database, GamesTable } from '../db/schema.js';
 import { newId, nowIso } from '../db/index.js';
 import { getGame, listGames } from '../games/registry.js';
@@ -86,11 +100,14 @@ export class GameService {
   async createGame(
     userId: string,
     gameType: string,
-    options?: Partial<GameOptions>,
+    table?: Partial<TableOptions>,
   ): Promise<GameSummary> {
     const mod = this.requireModule(gameType);
-    const opts = normalizeGameOptions({ ...DEFAULT_GAME_OPTIONS, ...(options ?? {}) });
-    if (!mod.supportsManual) opts.manual = false;
+    // House rules start at the module's declared defaults and are edited in the
+    // lobby; table settings are a separate axis (how it is played, not what the
+    // rules are) and live in their own column.
+    const tableOpts = normalizeTableOptions({ ...DEFAULT_TABLE_OPTIONS, ...(table ?? {}) });
+    if (!mod.supportsManual) tableOpts.manual = false;
     const id = newId();
     const pin = await this.allocatePin();
     const now = nowIso();
@@ -106,11 +123,12 @@ export class GameService {
         version: 0,
         current_state: JSON.stringify(null), // no runtime until start
         final_result: null,
+        options: JSON.stringify(defaultGameOptions(mod.options ?? [])),
+        table_options: JSON.stringify(tableOpts),
         created_by: userId,
         created_at: now,
         updated_at: now,
         ended_at: null,
-        options: JSON.stringify(opts),
       })
       .execute();
 
@@ -163,6 +181,83 @@ export class GameService {
     return this.getSummary(gameId);
   }
 
+  /**
+   * House rules. The host patches individual option ids; anything the module
+   * doesn't declare — or a value outside its definition — is rejected here,
+   * because the lobby UI can't be trusted to have sent a legal payload.
+   */
+  async setOptions(
+    gameId: string,
+    userId: string,
+    patch: Record<string, unknown>,
+  ): Promise<GameSummary> {
+    const game = await this.requireGame(gameId);
+    if (game.created_by !== userId) {
+      throw new GameServiceError('Only the host can change the house rules', 'FORBIDDEN');
+    }
+    if (game.status !== 'lobby') {
+      throw new GameServiceError('House rules are locked once the game starts', 'CONFLICT');
+    }
+    const defs = this.requireModule(game.game_type).options ?? [];
+    const current = this.optionsOf(game);
+
+    for (const [id, raw] of Object.entries(patch)) {
+      const def = defs.find((d) => d.id === id);
+      if (!def) throw new GameServiceError(`Unknown rule: ${id}`, 'BAD_REQUEST');
+      const value = coerceOptionValue(def, raw);
+      if (value === null) throw new GameServiceError(`Bad value for ${def.label}`, 'BAD_REQUEST');
+      current[id] = value;
+    }
+
+    await this.db
+      .updateTable('games')
+      .set({ options: JSON.stringify(current), updated_at: nowIso() })
+      .where('id', '=', gameId)
+      .execute();
+    return this.getSummary(gameId);
+  }
+
+  /**
+   * Each player picks their own look. Rules (enforced here, not just in the
+   * UI, since the UI can't be trusted): every non-null color must be unique
+   * among this game's seats; every non-null icon must be unique.
+   */
+  async setAppearance(
+    gameId: string,
+    userId: string,
+    color: string | null,
+    icon: string | null,
+  ): Promise<GameSummary> {
+    const game = await this.requireGame(gameId);
+    if (game.status !== 'lobby') throw new GameServiceError('Can only customize before the game starts', 'CONFLICT');
+    if (color !== null && !isValidSeatColor(color)) throw new GameServiceError('Unknown color', 'BAD_REQUEST');
+    if (icon !== null && !isValidSeatIcon(icon)) throw new GameServiceError('Unknown icon', 'BAD_REQUEST');
+
+    const players = await this.playersOf(gameId);
+    const me = players.find((p) => p.user_id === userId);
+    if (!me) throw new GameServiceError('You are not in this game', 'FORBIDDEN');
+
+    if (color !== null) {
+      // clash against picked colors AND the default color of anyone who hasn't picked
+      const clash = players.some(
+        (p) => p.seat_index !== me.seat_index && (p.color ?? defaultSeatColor(p.seat_index)) === color,
+      );
+      if (clash) throw new GameServiceError('Another player already has that color', 'CONFLICT');
+    }
+    if (icon !== null) {
+      const clash = players.some((p) => p.seat_index !== me.seat_index && p.icon === icon);
+      if (clash) throw new GameServiceError('Another player already has that icon', 'CONFLICT');
+    }
+
+    await this.db
+      .updateTable('game_players')
+      .set({ color, icon })
+      .where('game_id', '=', gameId)
+      .where('seat_index', '=', me.seat_index)
+      .execute();
+    return this.getSummary(gameId);
+  }
+
   async startGame(gameId: string, userId: string): Promise<GameRuntime> {
     const game = await this.requireGame(gameId);
     if (game.created_by !== userId) throw new GameServiceError('Only the host can start the game', 'FORBIDDEN');
@@ -181,7 +276,13 @@ export class GameService {
       .sort((a, b) => a.seat_index - b.seat_index)
       .map((p) => ({ seat: p.seat_index, team: p.team_index ?? undefined }));
 
-    const runtime = GameRuntime.start(mod, seats, newSeed(), this.optionsOf(game));
+    const runtime = GameRuntime.start(
+      mod,
+      seats,
+      newSeed(),
+      this.optionsOf(game),
+      this.tableOptionsOf(game),
+    );
     this.runtimes.set(gameId, runtime);
     await this.persist(gameId, runtime, { status: 'active' });
     return runtime;
@@ -199,13 +300,13 @@ export class GameService {
       .execute();
   }
 
-  /** Table settings for a game row, tolerant of rows written before options existed. */
-  private optionsOf(game: { options: string | null }): GameOptions {
-    if (!game.options) return { ...DEFAULT_GAME_OPTIONS };
+  /** Table settings for a row, tolerant of rows written before the column existed. */
+  private tableOptionsOf(game: { table_options: string | null }): TableOptions {
+    if (!game.table_options) return { ...DEFAULT_TABLE_OPTIONS };
     try {
-      return normalizeGameOptions(JSON.parse(game.options));
+      return normalizeTableOptions(JSON.parse(game.table_options));
     } catch {
-      return { ...DEFAULT_GAME_OPTIONS };
+      return { ...DEFAULT_TABLE_OPTIONS };
     }
   }
 
@@ -213,11 +314,11 @@ export class GameService {
    * Host-only lobby edit of the table settings. Frozen once the game starts —
    * the runtime snapshot holds its own copy from that point on.
    */
-  async setOptions(
+  async setTableOptions(
     gameId: string,
     userId: string,
-    options: Partial<GameOptions>,
-  ): Promise<GameOptions> {
+    table: Partial<TableOptions>,
+  ): Promise<TableOptions> {
     const game = await this.requireGame(gameId);
     if (game.created_by !== userId) {
       throw new GameServiceError('Only the host can change table settings', 'FORBIDDEN');
@@ -226,18 +327,18 @@ export class GameService {
       throw new GameServiceError('Game already started', 'CONFLICT');
     }
     const mod = this.requireModule(game.game_type);
-    const merged = normalizeGameOptions({ ...this.optionsOf(game), ...options });
+    const merged = normalizeTableOptions({ ...this.tableOptionsOf(game), ...table });
     if (!mod.supportsManual) merged.manual = false;
     await this.db
       .updateTable('games')
-      .set({ options: JSON.stringify(merged), updated_at: nowIso() })
+      .set({ table_options: JSON.stringify(merged), updated_at: nowIso() })
       .where('id', '=', gameId)
       .execute();
     return merged;
   }
 
-  async getOptions(gameId: string): Promise<GameOptions> {
-    return this.optionsOf(await this.requireGame(gameId));
+  async getTableOptions(gameId: string): Promise<TableOptions> {
+    return this.tableOptionsOf(await this.requireGame(gameId));
   }
 
   // ── Runtime access / rehydration ──────────────────────────────────────────
@@ -367,6 +468,8 @@ export class GameService {
         'game_players.team_index',
         'game_players.connected',
         'game_players.eliminated_at',
+        'game_players.color',
+        'game_players.icon',
         'user.name as display_name',
       ])
       .where('game_players.game_id', '=', gameId)
@@ -380,6 +483,8 @@ export class GameService {
       team: p.team_index,
       connected: Boolean(p.connected),
       eliminated: Boolean(p.eliminated_at),
+      color: p.color,
+      icon: p.icon,
     }));
 
     return {
@@ -391,7 +496,20 @@ export class GameService {
       createdAt: game.created_at,
       updatedAt: game.updated_at,
       players: seatAssignments,
+      options: this.optionsOf(game),
     };
+  }
+
+  /** Stored house rules, always complete and legal for the module's current defs. */
+  private optionsOf(game: GamesTable): GameOptions {
+    const mod = getGame(game.game_type);
+    let stored: unknown = {};
+    try {
+      stored = game.options ? JSON.parse(game.options) : {};
+    } catch {
+      stored = {};
+    }
+    return resolveGameOptions(mod?.options ?? [], stored);
   }
 
   async myGames(userId: string): Promise<GameSummary[]> {
@@ -503,6 +621,8 @@ export class GameService {
         connected: 0,
         eliminated_at: null,
         last_seen_at: nowIso(),
+        color: null,
+        icon: null,
       })
       .execute();
   }

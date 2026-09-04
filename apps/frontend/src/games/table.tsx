@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo } from 'react';
 import type { Seat } from '@gamebox/shared-types';
-import { DEFAULT_GAME_OPTIONS, type GameOptions } from '@gamebox/shared-types';
+import { DEFAULT_TABLE_OPTIONS, type TableOptions } from '@gamebox/shared-types';
 import { useBeatPlayer, useClockReading, type BeatPlayer, type ClockReading } from './beats.js';
 import { useTurnChime } from './anim.js';
 import { setMuted, unlockSound } from './sfx.js';
@@ -16,7 +16,7 @@ import type { LiveState } from './types.js';
  * spinning up its own.
  */
 export interface TableContextValue {
-  options: GameOptions;
+  options: TableOptions;
   beats: BeatPlayer;
   clock: ClockReading | null;
   /** Seat whose point of view the board should present, or null for neutral. */
@@ -50,7 +50,7 @@ export function TableProvider({
   yourSeat?: Seat | null;
   children: React.ReactNode;
 }) {
-  const options = state?.options ?? DEFAULT_GAME_OPTIONS;
+  const options = state?.options ?? DEFAULT_TABLE_OPTIONS;
   const beats = useBeatPlayer(state, options);
   const clock = useClockReading(state?.clock);
 

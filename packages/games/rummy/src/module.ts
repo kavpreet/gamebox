@@ -189,6 +189,7 @@ export function findMeldCandidates(hand: Card[]): number[][] {
 export const rummy: GameModule<RummyPublic, RummyPrivate | Hidden, RummyMove> = {
   slug: 'rummy',
   displayName: 'Rummy',
+  description: 'Draw and discard to meld sets and runs; first to empty their hand wins.',
   rulesVersion: '1.0.0',
   minPlayers: 2,
   maxPlayers: 6,

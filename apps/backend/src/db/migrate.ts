@@ -91,6 +91,24 @@ export async function migrateAppTables(db: Kysely<Database>): Promise<void> {
     .unique()
     .execute();
 
+  // Added after the initial release: player appearance (color/icon) and the
+  // game's chosen house rules. Neither dialect's Kysely builder exposes a
+  // portable ADD COLUMN IF NOT EXISTS here, so these are idempotent by
+  // swallowing "column already exists" on rerun.
+  const addColumn = async (table: 'game_players' | 'games', col: string) => {
+    try {
+      await db.schema.alterTable(table).addColumn(col, 'text').execute();
+    } catch (err) {
+      const msg = String((err as Error).message ?? err).toLowerCase();
+      if (!msg.includes('duplicate') && !msg.includes('already exists')) throw err;
+    }
+  };
+  for (const col of ['color', 'icon']) await addColumn('game_players', col);
+  await addColumn('games', 'options');
+  // How the match is *played* (manual pieces, turn clock, animation) — a
+  // separate axis from the house rules in `options`, so a separate column.
+  await addColumn('games', 'table_options');
+
   await db.schema
     .createTable('moves')
     .ifNotExists()
@@ -134,10 +152,6 @@ export async function migrateAppTables(db: Kysely<Database>): Promise<void> {
   await addColumnIfMissing(db, 'rooms', 'token_epoch', (b) =>
     b.addColumn('token_epoch', 'integer', (c) => c.notNull().defaultTo(0)),
   );
-
-  // Per-game table settings (manual mode, turn clock, animation) — added
-  // after the games table shipped, so existing rows fall back to defaults.
-  await addColumnIfMissing(db, 'games', 'options', (b) => b.addColumn('options', 'text'));
 
   await db.schema
     .createTable('allowed_emails')

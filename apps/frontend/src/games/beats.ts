@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Beat, GameOptions, TurnClock } from '@gamebox/shared-types';
-import { DEFAULT_GAME_OPTIONS } from '@gamebox/shared-types';
+import type { Beat, TableOptions, TurnClock } from '@gamebox/shared-types';
+import { DEFAULT_TABLE_OPTIONS } from '@gamebox/shared-types';
 import { playBeatSound, soundReady } from './sfx.js';
 import type { LiveState } from './types.js';
 
@@ -54,8 +54,8 @@ export function beatHold(beat: Beat): number {
  * followed a mutation carries beats, so a client that reconnects mid-game
  * receives an empty list and replays nothing it already missed.
  */
-export function useBeatPlayer(state: LiveState | null, options?: GameOptions): BeatPlayer {
-  const opts = options ?? state?.options ?? DEFAULT_GAME_OPTIONS;
+export function useBeatPlayer(state: LiveState | null, options?: TableOptions): BeatPlayer {
+  const opts = options ?? state?.options ?? DEFAULT_TABLE_OPTIONS;
   const animate = opts.animate;
   const speed = opts.speed || 1;
   const wantSound = opts.sound;

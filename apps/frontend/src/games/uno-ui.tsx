@@ -1,92 +1,160 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import type { UnoPublic, UnoMove, Face, UnoColor } from '@gamebox/game-uno';
+import type { Seat } from '@gamebox/shared-types';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, WinnerBanner } from './common.js';
+import { seatName, SeatDot, WinnerBanner, Prompt } from './common.js';
 
-/** Player view additionally carries `hand` (the projection adds it). */
-type UnoView = UnoPublic & { hand: Face[] | null };
+/** Player view carries `hand`; Flip also carries every hand's inactive faces. */
+type UnoView = UnoPublic & {
+  hand: Face[] | null;
+  backsides: Record<Seat, Face[]> | null;
+};
 
-const COLOR_HEX: Record<string, string> = {
-  R: '#e94560',
-  Y: '#f5a623',
-  G: '#2ec46f',
-  B: '#3fa7ff',
-  W: '#232847',
+/** Light side: classic bright cards. Dark side (Flip): neon-on-black. */
+const LIGHT_HEX: Record<string, string> = {
+  R: '#e8355c', Y: '#f5a623', G: '#2ec46f', B: '#3f8dff', W: '#232847',
+};
+const LIGHT_DARKER: Record<string, string> = {
+  R: '#b01f42', Y: '#c77f12', G: '#1d9a52', B: '#2a63c4', W: '#15182e',
+};
+const DARK_HEX: Record<string, string> = {
+  R: '#ff2d8f', Y: '#ff8a00', G: '#00d6b0', B: '#8f4bff', W: '#0d0818',
 };
 const COLOR_NAME: Record<string, string> = { R: 'Red', Y: 'Yellow', G: 'Green', B: 'Blue' };
+const DARK_NAME: Record<string, string> = { R: 'Pink', Y: 'Orange', G: 'Teal', B: 'Purple' };
 
 const VALUE_LABEL: Record<string, string> = {
-  skip: '⊘',
-  reverse: '⇄',
-  draw1: '+1',
-  draw2: '+2',
-  draw5: '+5',
-  skipall: '⊘⊘',
-  flip: '⟲',
-  wild: '★',
-  wild4: '+4★',
-  wilddraw2: '+2★',
-  wilddrawcolor: '+★',
+  skip: '⊘', reverse: '⇄', draw1: '+1', draw2: '+2', draw5: '+5',
+  skipall: '⊘⊘', flip: '⟲', wild: '★', wild4: '+4★', wilddraw2: '+2★', wilddrawcolor: '+★',
 };
 
-function CardFace({
-  face,
-  big,
-  onClick,
-  disabled,
-  dark,
-}: {
+function hexFor(face: Face, side: 'light' | 'dark'): string {
+  return (side === 'dark' ? DARK_HEX : LIGHT_HEX)[face.color] ?? '#232847';
+}
+
+function CardFace({ face, side, big, mini, dealIn, onClick, disabled }: {
   face: Face;
+  side: 'light' | 'dark';
   big?: boolean;
+  mini?: boolean;
+  dealIn?: boolean;
   onClick?: () => void;
   disabled?: boolean;
-  dark?: boolean;
 }) {
   const label = VALUE_LABEL[face.value] ?? face.value;
+  const isWild = face.color === 'W';
+  const dark = side === 'dark';
+  const hex = hexFor(face, side);
+  const bg = isWild
+    ? (dark
+      ? 'conic-gradient(from 45deg, #ff2d8f 0 25%, #ff8a00 0 50%, #00d6b0 0 75%, #8f4bff 0)'
+      : 'conic-gradient(from 45deg, #e8355c 0 25%, #f5a623 0 50%, #2ec46f 0 75%, #3f8dff 0)')
+    : dark
+      ? `linear-gradient(150deg, #1a1128, #0c0716)` // black card, neon accents
+      : `linear-gradient(150deg, ${LIGHT_HEX[face.color]}, ${LIGHT_DARKER[face.color]})`;
+  const w = mini ? 22 : big ? '16vmin' : 54;
+  const h = mini ? 32 : big ? '24vmin' : 80;
   return (
     <div
       onClick={disabled ? undefined : onClick}
+      className={`hand-card${onClick && !disabled ? ' clickable' : ''}${dealIn ? ' deal-in' : ''}`}
       style={{
-        width: big ? '16vmin' : 54,
-        height: big ? '24vmin' : 80,
-        minWidth: big ? 90 : undefined,
-        minHeight: big ? 135 : undefined,
-        borderRadius: 10,
-        background: COLOR_HEX[face.color] ?? '#232847',
-        border: dark ? '3px solid #7c5cff' : '3px solid rgba(255,255,255,0.85)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: big ? '6vmin' : 26,
-        fontWeight: 800,
-        color: 'white',
-        textShadow: '0 1px 3px rgba(0,0,0,0.55)',
-        cursor: onClick && !disabled ? 'pointer' : 'default',
+        position: 'relative',
+        width: w, height: h,
+        minWidth: big ? 90 : undefined, minHeight: big ? 135 : undefined,
+        background: bg,
+        border: dark
+          ? `${mini ? 1.5 : 2.5}px solid ${isWild ? '#8f4bff' : hex}`
+          : `${mini ? 1.5 : 3}px solid rgba(255,255,255,0.9)`,
+        boxShadow: dark && !mini ? `0 0 12px ${isWild ? '#8f4bff55' : hex + '55'}, 0 3px 8px rgba(0,0,0,0.5)` : undefined,
+        fontSize: mini ? 12 : big ? '5vmin' : 22,
+        color: dark && !isWild ? hex : 'white',
+        textShadow: dark ? `0 0 8px ${hex}` : '0 2px 3px rgba(0,0,0,0.55)',
         opacity: disabled ? 0.35 : 1,
-        userSelect: 'none',
-        flexShrink: 0,
+        overflow: 'hidden',
       }}
     >
-      {label}
+      {!mini && (
+        <div style={{
+          position: 'absolute', inset: '12% 8%',
+          borderRadius: '50%',
+          transform: 'rotate(-28deg)',
+          background: dark ? `${hex}22` : 'rgba(255,255,255,0.16)',
+          border: `2px solid ${dark ? hex : 'rgba(255,255,255,0.55)'}`,
+        }} />
+      )}
+      <span style={{ position: 'relative', fontWeight: 900 }}>{label}</span>
+      {!mini && (
+        <>
+          <span style={{ position: 'absolute', top: 4, left: 7, fontSize: big ? '2vmin' : 11, fontWeight: 900 }}>{label}</span>
+          <span style={{ position: 'absolute', bottom: 4, right: 7, fontSize: big ? '2vmin' : 11, fontWeight: 900, transform: 'rotate(180deg)' }}>{label}</span>
+        </>
+      )}
     </div>
+  );
+}
+
+/** Tiny row of a player's INACTIVE faces — Flip's shared information. */
+function BacksideRow({ faces, side }: { faces: Face[]; side: 'light' | 'dark' }) {
+  const off = side === 'light' ? 'dark' : 'light';
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+      {faces.map((f, i) => <CardFace key={i} face={f} side={off} mini />)}
+    </div>
+  );
+}
+
+function eventText(view: UnoView, summary: TvViewProps['state']['summary']): string | null {
+  if (!view.lastEvent) return null;
+  const who = view.lastEventSeat !== null ? seatName(summary as never, view.lastEventSeat) : '';
+  if (view.lastEvent === 'CAUGHT_UNO' && view.lastEventTarget !== null) {
+    return `🚨 ${who} caught ${seatName(summary as never, view.lastEventTarget)} without UNO — +2 cards!`;
+  }
+  return `${who} ${view.lastEvent}`;
+}
+
+function turnSeatOf(view: UnoView): Seat {
+  return view.order[view.turnIndex]!;
+}
+
+function catchTargets(view: UnoView, me?: Seat): Seat[] {
+  return view.order.filter(
+    (s) => s !== me && view.handCounts[s] === 1 && !view.unoDeclared.includes(s),
   );
 }
 
 function TvView({ state }: TvViewProps<UnoView>) {
   const view = state.view;
   if (!view) return null;
+  const dark = view.side === 'dark';
+  const turnSeat = turnSeatOf(view);
+  const isFlip = view.variant === 'uno-flip';
   return (
-    <div className="tv-main">
+    <div className="tv-main" style={dark ? {
+      background: 'radial-gradient(700px 500px at 50% 40%, rgba(143,75,255,0.16), transparent 70%)',
+      borderRadius: '2vmin',
+    } : undefined}>
       <div className="tv-board" style={{ flexDirection: 'column', gap: '3vmin' }}>
+        {isFlip && (
+          <div className={`badge ${dark ? '' : 'on'}`} style={dark ? {
+            background: 'linear-gradient(135deg, #8f4bff, #ff2d8f)', color: 'white', fontSize: '2vmin',
+          } : { fontSize: '2vmin' }}>
+            {dark ? '🌙 DARK SIDE' : '☀️ LIGHT SIDE'}
+          </div>
+        )}
         <div style={{ display: 'flex', gap: '4vmin', alignItems: 'center' }}>
           {/* draw pile */}
           <div style={{ textAlign: 'center' }}>
             <div
+              key={view.drawPileSize}
+              className="count-bump"
               style={{
                 width: '16vmin', height: '24vmin', minWidth: 90, minHeight: 135, borderRadius: 10,
-                background: view.side === 'dark' ? '#2d1b4e' : '#1b2038',
-                border: '3px dashed #444b78', display: 'flex', alignItems: 'center',
-                justifyContent: 'center', fontSize: '3vmin', color: '#69709c',
+                background: dark
+                  ? 'repeating-linear-gradient(135deg, #2d1b4e, #2d1b4e 8px, #1c1030 8px, #1c1030 16px)'
+                  : 'repeating-linear-gradient(135deg, #1b2038, #1b2038 8px, #232847 8px, #232847 16px)',
+                border: `3px dashed ${dark ? '#8f4bff' : '#444b78'}`, display: 'flex', alignItems: 'center',
+                justifyContent: 'center', fontSize: '3vmin', fontWeight: 800, color: dark ? '#b79aff' : '#69709c',
               }}
             >
               {view.drawPileSize}
@@ -94,40 +162,59 @@ function TvView({ state }: TvViewProps<UnoView>) {
             <p className="dim" style={{ fontSize: '1.8vmin' }}>draw pile</p>
           </div>
           {view.discardTop && (
-            <div style={{ textAlign: 'center' }}>
-              <CardFace face={view.discardTop} big dark={view.side === 'dark'} />
+            <div style={{ textAlign: 'center' }} key={view.discardCount} className="pop-in">
+              <CardFace face={view.discardTop} big side={view.side} />
               <p className="dim" style={{ fontSize: '1.8vmin' }}>discard</p>
             </div>
           )}
           <div style={{ fontSize: '5vmin' }}>{view.direction === 1 ? '↻' : '↺'}</div>
         </div>
+        {view.pendingDraw > 0 && (
+          <div key={view.pendingDraw} className="badge gold-badge count-bump" style={{ fontSize: '2.6vmin' }}>
+            🔥 +{view.pendingDraw} stacked — {seatName(state.summary, turnSeat)} must stack or take them
+          </div>
+        )}
         {view.currentColor && (
           <div style={{ fontSize: '2.4vmin' }}>
-            Color: <span style={{ color: COLOR_HEX[view.currentColor], fontWeight: 800 }}>{COLOR_NAME[view.currentColor]}</span>
-            {view.variant === 'uno-flip' && (
-              <span className="dim"> · {view.side} side</span>
-            )}
+            Color:{' '}
+            <span style={{ color: (dark ? DARK_HEX : LIGHT_HEX)[view.currentColor], fontWeight: 800 }}>
+              {(dark ? DARK_NAME : COLOR_NAME)[view.currentColor]}
+            </span>
           </div>
         )}
         {view.lastEvent && (
-          <div className="dim" style={{ fontSize: '2.2vmin' }}>
-            {seatName(state.summary, view.order[(view.turnIndex - view.direction + view.order.length) % view.order.length]!)} {view.lastEvent}
+          <div className="dim" style={{ fontSize: '2.2vmin' }} key={`${view.lastEvent}-${view.discardCount}-${view.drawPileSize}`}>
+            {eventText(view, state.summary)}
           </div>
         )}
       </div>
       <div className="tv-sidebar">
         {state.summary.players
           .filter((p) => view.order.includes(p.seat))
-          .map((p) => (
-            <div key={p.seat} className={`tv-player-chip ${state.activeSeats.includes(p.seat) ? 'active' : ''}`}>
-              <span className={`token seat-color-${p.seat % 6}`} />
-              <span className="grow">{p.displayName}</span>
-              <strong>{view.handCounts[p.seat] ?? 0}</strong>
-              {view.unoCalled.includes(p.seat) && <span className="badge on">UNO!</span>}
-              {view.unoPending === p.seat && <span className="badge">didn't call…</span>}
-              {!p.connected && <span className="dc">⚠</span>}
-            </div>
-          ))}
+          .map((p) => {
+            const count = view.handCounts[p.seat] ?? 0;
+            const declared = view.unoDeclared.includes(p.seat);
+            const onOne = count === 1;
+            return (
+              <div key={p.seat}
+                className={`tv-player-chip ${p.seat === turnSeat ? 'active' : ''}`}
+                style={{ flexWrap: 'wrap' }}>
+                <SeatDot summary={state.summary} seat={p.seat} />
+                <span className="grow">
+                  {p.displayName}
+                  {declared && <span className="badge gold-badge" style={{ marginLeft: 6 }}>UNO! 🔔</span>}
+                  {onOne && !declared && <span className="badge" style={{ marginLeft: 6, color: 'var(--danger)' }}>1 card</span>}
+                </span>
+                <strong key={count} className="count-bump">{count}</strong>
+                {!p.connected && <span className="dc">⚠</span>}
+                {isFlip && view.backsides?.[p.seat] && view.backsides[p.seat]!.length > 0 && (
+                  <div style={{ width: '100%' }}>
+                    <BacksideRow faces={view.backsides[p.seat]!} side={view.side} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
         <WinnerBanner state={state} />
       </div>
     </div>
@@ -137,72 +224,107 @@ function TvView({ state }: TvViewProps<UnoView>) {
 function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<UnoView, UnoMove>) {
   const view = state.view;
   const [wildIdx, setWildIdx] = useState<number | null>(null);
-  const [unoArmed, setUnoArmed] = useState(false);
+  const [swapIdx, setSwapIdx] = useState<number | null>(null);
+  const prevHandLen = useRef<number>(view?.hand?.length ?? 0);
   if (!view) return null;
-  const myTurn = state.activeSeats.includes(yourSeat) && state.status === 'active';
+  const dark = view.side === 'dark';
+  const isFlip = view.variant === 'uno-flip';
+  const turnSeat = turnSeatOf(view);
+  const myTurn = turnSeat === yourSeat && state.status === 'active';
   const legal = (state.legalMoves ?? []) as UnoMove[];
   const playableIdx = new Set(legal.filter((m) => m.kind === 'PLAY').map((m) => (m as { card: number }).card));
   const canDraw = legal.some((m) => m.kind === 'DRAW');
   const canPass = legal.some((m) => m.kind === 'PASS');
-  const canCatch = legal.some((m) => m.kind === 'CATCH_UNO');
+  const canDeclare = legal.some((m) => m.kind === 'DECLARE_UNO');
+  const targets = catchTargets(view, yourSeat);
+  // House rules: an out-of-turn jump-in is a legal PLAY while it isn't your
+  // turn; a live draw stack means your only choices are stack or eat it.
+  const canJumpIn = !myTurn && playableIdx.size > 0 && state.status === 'active';
+  const owedByMe = myTurn && view.pendingDraw > 0;
 
-  // Declaring UNO has to be a deliberate act or it is not a ritual — so it is
-  // armed before the play, exactly like saying it out loud as you put the card
-  // down. Going down to one card without it leaves you open to a catch.
-  const goingToOne = (view.hand?.length ?? 0) === 2;
+  // deal-in animation: cards appended since the last render fly in
+  const handLen = view.hand?.length ?? 0;
+  const dealtFrom = handLen > prevHandLen.current ? prevHandLen.current : handLen;
+  prevHandLen.current = handLen;
 
   const play = (idx: number, face: Face) => {
-    const callUno = goingToOne && unoArmed;
     if (face.color === 'W') {
       setWildIdx(idx);
+    } else if (view.rules?.sevenZero && face.value === '7' && view.order.length > 2) {
+      setSwapIdx(idx); // 7 swaps hands — with whom?
     } else {
-      submitMove('PLAY', { card: idx, callUno });
-      setUnoArmed(false);
+      submitMove('PLAY', { card: idx });
     }
   };
 
+  const colorHex = dark ? DARK_HEX : LIGHT_HEX;
+  const colorName = dark ? DARK_NAME : COLOR_NAME;
+
   return (
     <div className="page">
+      {isFlip && (
+        <div className="row center-h">
+          <span className="badge" style={dark ? {
+            background: 'linear-gradient(135deg, #8f4bff, #ff2d8f)', color: 'white',
+          } : undefined}>
+            {dark ? '🌙 DARK SIDE' : '☀️ LIGHT SIDE'}
+          </span>
+        </div>
+      )}
       <div className="card center">
         <div className="row" style={{ justifyContent: 'center' }}>
-          {view.discardTop && <CardFace face={view.discardTop} dark={view.side === 'dark'} />}
+          {view.discardTop && (
+            <span key={view.discardCount} className="pop-in" style={{ display: 'inline-block' }}>
+              <CardFace face={view.discardTop} side={view.side} />
+            </span>
+          )}
           <div>
             {view.currentColor && (
-              <p style={{ color: COLOR_HEX[view.currentColor], fontWeight: 800 }}>{COLOR_NAME[view.currentColor]}</p>
+              <p style={{ color: colorHex[view.currentColor], fontWeight: 800 }}>{colorName[view.currentColor]}</p>
             )}
             <p className="dim small">{view.drawPileSize} in pile · {view.direction === 1 ? '↻' : '↺'}</p>
-            {view.variant === 'uno-flip' && <p className="dim small">{view.side} side</p>}
           </div>
         </div>
+
+        {(canDeclare || targets.length > 0) && state.status === 'active' && (
+          <div className="action-bar">
+            {canDeclare && (
+              <button className="gold big" style={{ width: 'auto' }} onClick={() => submitMove('DECLARE_UNO', {})}>
+                🔔 UNO!
+              </button>
+            )}
+            {targets.map((t) => (
+              <button key={t} style={{ background: 'var(--danger)' }}
+                onClick={() => submitMove('CATCH_UNO', { target: t })}>
+                🚨 Catch {seatName(state.summary, t)}!
+              </button>
+            ))}
+          </div>
+        )}
+
+        {view.pendingDraw > 0 && (
+          <div className="badge gold-badge" style={{ fontSize: '1rem', padding: '0.4em 1em' }}>
+            🔥 +{view.pendingDraw} stacked on {seatName(state.summary, turnSeat)}
+          </div>
+        )}
+
         {state.status === 'completed' ? (
           <WinnerBanner state={state} />
         ) : myTurn ? (
-          <p style={{ color: 'var(--gold)', fontWeight: 700 }}>
-            {view.phase === 'PLAY_DRAWN_OR_PASS' ? 'Play the drawn card or pass' : 'Your turn!'}
-          </p>
+          <Prompt>
+            {owedByMe
+              ? `Stack another ${view.pendingDrawValue?.startsWith('draw') || view.pendingDrawValue?.startsWith('wild') ? 'draw card' : 'card'} or take ${view.pendingDraw}`
+              : view.phase === 'PLAY_DRAWN_OR_PASS'
+                ? 'Play the drawn card or pass'
+                : 'Your turn!'}
+          </Prompt>
         ) : (
-          <p className="dim">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</p>
+          <>
+            <p className="waiting">Waiting for {seatName(state.summary, turnSeat)}</p>
+            {canJumpIn && <p className="dim small">You hold that exact card — jump in!</p>}
+          </>
         )}
-        {view.lastEvent && <p className="dim small">{view.lastEvent}</p>}
-
-        {myTurn && canCatch && view.unoPending !== null && (
-          <button
-            style={{ background: 'var(--danger)' }}
-            onClick={() => submitMove('CATCH_UNO', {})}
-          >
-            ☝ {seatName(state.summary, view.unoPending)} didn't say UNO — make them draw 2
-          </button>
-        )}
-
-        {myTurn && goingToOne && (
-          <button
-            className={unoArmed ? '' : 'secondary'}
-            onClick={() => setUnoArmed(!unoArmed)}
-            style={unoArmed ? { background: 'var(--gold)', color: '#1b2038', fontWeight: 900 } : undefined}
-          >
-            {unoArmed ? '🗣 UNO! (armed — play your card)' : 'Say “UNO!” with your next card'}
-          </button>
-        )}
+        {view.lastEvent && <p className="event-line" key={`${view.lastEvent}-${view.discardCount}-${view.drawPileSize}`}>{eventText(view, state.summary)}</p>}
       </div>
 
       {view.hand && (
@@ -211,7 +333,9 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<UnoView, Un
             <h3>Your hand ({view.hand.length})</h3>
             <div className="row">
               {myTurn && canDraw && (
-                <button className="secondary" onClick={() => submitMove('DRAW', {})}>Draw</button>
+                <button className={owedByMe ? '' : 'secondary'} onClick={() => submitMove('DRAW', {})}>
+                  {owedByMe ? `Take ${view.pendingDraw}` : 'Draw'}
+                </button>
               )}
               {myTurn && canPass && (
                 <button className="secondary" onClick={() => submitMove('PASS', {})}>Pass</button>
@@ -223,11 +347,47 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<UnoView, Un
               <CardFace
                 key={idx}
                 face={face}
-                dark={view.side === 'dark'}
-                onClick={myTurn ? () => play(idx, face) : undefined}
-                disabled={myTurn && !playableIdx.has(idx)}
+                side={view.side}
+                dealIn={idx >= dealtFrom}
+                onClick={myTurn || canJumpIn ? () => play(idx, face) : undefined}
+                disabled={(myTurn || canJumpIn) && !playableIdx.has(idx)}
               />
             ))}
+          </div>
+        </div>
+      )}
+
+      {isFlip && view.backsides && (
+        <div className="card">
+          <h3>Everyone's {dark ? 'light' : 'dark'} sides (visible to all)</h3>
+          {view.order.filter((s) => s !== yourSeat).map((s) => (
+            <div key={s} className="row" style={{ alignItems: 'flex-start' }}>
+              <span className="dim small" style={{ minWidth: 80 }}>{seatName(state.summary, s)}</span>
+              <BacksideRow faces={view.backsides![s] ?? []} side={view.side} />
+            </div>
+          ))}
+          <p className="dim small">These are the flip sides of the cards they hold — plan your ⟲ flips!</p>
+        </div>
+      )}
+
+      {swapIdx !== null && (
+        <div className="overlay" onClick={() => setSwapIdx(null)}>
+          <div className="card" onClick={(e) => e.stopPropagation()}>
+            <h3>Swap hands with…</h3>
+            <p className="dim small">You'll trade your whole hand for theirs.</p>
+            {view.order.filter((s) => s !== yourSeat).map((s) => (
+              <button
+                key={s}
+                className="secondary"
+                onClick={() => {
+                  submitMove('PLAY', { card: swapIdx, swapWith: s });
+                  setSwapIdx(null);
+                }}
+              >
+                {seatName(state.summary, s)} ({view.handCounts[s] ?? 0} cards)
+              </button>
+            ))}
+            <button className="ghost" onClick={() => setSwapIdx(null)}>Cancel</button>
           </div>
         </div>
       )}
@@ -240,14 +400,13 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<UnoView, Un
               {(['R', 'Y', 'G', 'B'] as UnoColor[]).map((c) => (
                 <button
                   key={c}
-                  style={{ background: COLOR_HEX[c], flex: 1 }}
+                  style={{ background: colorHex[c], flex: 1 }}
                   onClick={() => {
-                    submitMove('PLAY', { card: wildIdx, chooseColor: c, callUno: goingToOne && unoArmed });
+                    submitMove('PLAY', { card: wildIdx, chooseColor: c });
                     setWildIdx(null);
-                    setUnoArmed(false);
                   }}
                 >
-                  {COLOR_NAME[c]}
+                  {colorName[c]}
                 </button>
               ))}
             </div>

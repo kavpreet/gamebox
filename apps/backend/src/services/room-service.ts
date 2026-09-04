@@ -104,6 +104,16 @@ export class RoomService {
     }));
   }
 
+  /** Rooms currently showing a given game (used to clear TVs when it closes). */
+  async roomsShowing(gameId: string): Promise<RoomDTO[]> {
+    const rows = await this.db
+      .selectFrom('rooms')
+      .selectAll()
+      .where('active_game_id', '=', gameId)
+      .execute();
+    return rows.map((r) => this.toDto(r));
+  }
+
   /** Mints a token for a kiosk that can't practically type a PIN (Pi config). */
   async mintTokenFor(id: string): Promise<string> {
     const row = await this.rowById(id);

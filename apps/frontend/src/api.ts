@@ -1,10 +1,12 @@
 import type {
-  GameOptions,
+  GameOptionDef,
+  GameOptionValue,
   GameSummary,
   RoomDTO,
   AdminRoomDTO,
   AllowedEmailDTO,
   MeDTO,
+  TableOptions,
 } from '@gamebox/shared-types';
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -24,9 +26,12 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 export interface GameTypeInfo {
   slug: string;
   displayName: string;
+  description: string;
   minPlayers: number;
   maxPlayers: number;
   teams: 'none' | 'optional' | 'required';
+  /** Alternate rules this game supports — rendered as the lobby's house-rules card. */
+  options: GameOptionDef[];
   /** Whether this game splits its moves into hand-played steps (manual mode). */
   supportsManual: boolean;
 }
@@ -39,16 +44,21 @@ export interface AuthConfig {
 export const api = {
   authConfig: () => req<AuthConfig>('GET', '/api/auth-config'),
   gameTypes: () => req<GameTypeInfo[]>('GET', '/api/game-types'),
-  createGame: (gameType: string, options?: Partial<GameOptions>) =>
-    req<GameSummary>('POST', '/api/games', { gameType, options }),
-  gameOptions: (id: string) => req<GameOptions>('GET', `/api/games/${id}/options`),
-  setGameOptions: (id: string, options: Partial<GameOptions>) =>
-    req<GameOptions>('POST', `/api/games/${id}/options`, options),
+  createGame: (gameType: string, table?: Partial<TableOptions>) =>
+    req<GameSummary>('POST', '/api/games', { gameType, table }),
+  /** Table settings — how the match is played, not what its rules are. */
+  tableOptions: (id: string) => req<TableOptions>('GET', `/api/games/${id}/table-options`),
+  setTableOptions: (id: string, table: Partial<TableOptions>) =>
+    req<TableOptions>('POST', `/api/games/${id}/table-options`, table),
   joinByPin: (pin: string) => req<GameSummary>('POST', '/api/games/join', { pin }),
   myGames: () => req<GameSummary[]>('GET', '/api/games/mine'),
   game: (id: string) => req<GameSummary>('GET', `/api/games/${id}`),
   setTeams: (id: string, teams: Record<number, number | null>) =>
     req<GameSummary>('POST', `/api/games/${id}/teams`, { teams }),
+  setOptions: (id: string, options: Record<string, GameOptionValue>) =>
+    req<GameSummary>('POST', `/api/games/${id}/options`, { options }),
+  setAppearance: (id: string, color: string | null, icon: string | null) =>
+    req<GameSummary>('POST', `/api/games/${id}/appearance`, { color, icon }),
   startGame: (id: string) => req<GameSummary>('POST', `/api/games/${id}/start`),
   abandonGame: (id: string) => req<{ ok: boolean }>('POST', `/api/games/${id}/abandon`),
   rooms: () => req<RoomDTO[]>('GET', '/api/rooms'),

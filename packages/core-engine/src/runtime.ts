@@ -5,9 +5,14 @@ import type {
   DisconnectOption,
   Beat,
   GameOptions,
+  TableOptions,
   TurnClock,
 } from '@gamebox/shared-types';
-import { DEFAULT_GAME_OPTIONS, normalizeGameOptions } from '@gamebox/shared-types';
+import {
+  DEFAULT_TABLE_OPTIONS,
+  normalizeTableOptions,
+  resolveGameOptions,
+} from '@gamebox/shared-types';
 import type { GameModule, GameState, EndResult } from './game-module.js';
 import { IllegalMove } from './game-module.js';
 import { createSeededRandom, type SeededRandom } from './rng.js';
@@ -32,8 +37,8 @@ export interface RuntimeSnapshot {
   activeSeats: Seat[];
   result: EndResult | null;
   removedSeats: Seat[];
-  /** Table settings frozen at start. Absent in snapshots written before options existed. */
-  options?: GameOptions;
+  /** Table settings frozen at start. Absent in snapshots written before they existed. */
+  table?: TableOptions;
   /** ISO instant the current turn began — the anchor for the turn clock. */
   turnStartedAt?: string;
   /** Seats the clock is running against; a change here restarts the clock. */
@@ -61,7 +66,7 @@ export class GameRuntime {
   private status: GameStatus;
   private result: EndResult | null;
   private removedSeats: Set<Seat>;
-  private options: GameOptions;
+  private table: TableOptions;
   private turnStartedAt: string;
   private clockSeats: Seat[];
   /** Beats emitted by the most recent mutation, handed to clients once. */
@@ -87,7 +92,7 @@ export class GameRuntime {
     this.status = snapshot.status;
     this.result = snapshot.result;
     this.removedSeats = new Set(snapshot.removedSeats);
-    this.options = normalizeGameOptions(snapshot.options);
+    this.table = normalizeTableOptions(snapshot.table);
     this.turnStartedAt = snapshot.turnStartedAt ?? new Date().toISOString();
     this.clockSeats = snapshot.clockSeats ?? snapshot.activeSeats;
   }
@@ -96,15 +101,21 @@ export class GameRuntime {
     module: GameModule<any, any, any>,
     seats: { seat: Seat; team?: number }[],
     seed: number,
-    options?: Partial<GameOptions>,
+    options: GameOptions = {},
+    table?: Partial<TableOptions>,
   ): GameRuntime {
     const rng = createSeededRandom(seed);
-    const opts = normalizeGameOptions({ ...DEFAULT_GAME_OPTIONS, ...(options ?? {}) });
+    const tableOpts = normalizeTableOptions({ ...DEFAULT_TABLE_OPTIONS, ...(table ?? {}) });
     // A module that hasn't implemented the split moves can't honour manual
     // mode; running it manually anyway would strand players waiting for a
     // button that never appears.
-    if (!module.supportsManual) opts.manual = false;
-    const state = module.setup(seats, rng, opts);
+    if (!module.supportsManual) tableOpts.manual = false;
+    const state = module.setup(
+      seats,
+      rng,
+      resolveGameOptions(module.options ?? [], options),
+      tableOpts,
+    );
     const activeSeats = module.activePlayers(state);
     return new GameRuntime(module, {
       state,
@@ -114,14 +125,15 @@ export class GameRuntime {
       activeSeats,
       result: null,
       removedSeats: [],
-      options: opts,
+      table: tableOpts,
       turnStartedAt: new Date().toISOString(),
       clockSeats: activeSeats,
     });
   }
 
-  get gameOptions(): GameOptions {
-    return this.options;
+  /** How this table is played — pacing, manual pieces, clock. Not the rules. */
+  get tableOptions(): TableOptions {
+    return this.table;
   }
 
   /** Narration from the most recent mutation; reading it clears it. */
@@ -141,10 +153,10 @@ export class GameRuntime {
     if (this.status !== 'active') return null;
     const seats = this.activeSeats();
     const deadline =
-      this.options.clock === 'off'
+      this.table.clock === 'off'
         ? null
-        : new Date(Date.parse(this.turnStartedAt) + this.options.clockSeconds * 1000).toISOString();
-    return { mode: this.options.clock, startedAt: this.turnStartedAt, deadline, seats };
+        : new Date(Date.parse(this.turnStartedAt) + this.table.clockSeconds * 1000).toISOString();
+    return { mode: this.table.clock, startedAt: this.turnStartedAt, deadline, seats };
   }
 
   /** Seats whose allowance has run out — hard-mode enforcement only. */
@@ -218,7 +230,7 @@ export class GameRuntime {
       payload,
       rng: this.rng,
       emit: (b) => beats.push(b),
-      options: this.options,
+      table: this.table,
     });
     return this.afterMutation(beats);
   }
@@ -332,7 +344,7 @@ export class GameRuntime {
       activeSeats: this.activeSeats(),
       result: this.result,
       removedSeats: Array.from(this.removedSeats),
-      options: this.options,
+      table: this.table,
       turnStartedAt: this.turnStartedAt,
       clockSeats: this.clockSeats,
     };

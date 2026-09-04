@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import type { GameSummary, Seat, GameStatus, Beat, TurnClock, GameOptions } from '@gamebox/shared-types';
+import type { GameSummary, Seat, GameStatus, Beat, TurnClock, TableOptions } from '@gamebox/shared-types';
 
 /** Payload of the server's `game:state` / `tv:state` events. */
 export interface LiveState<TView = unknown, TMove = unknown> {
@@ -13,7 +13,7 @@ export interface LiveState<TView = unknown, TMove = unknown> {
   /** Narration for the move that produced this update; empty on a plain re-sync. */
   beats?: Beat[];
   clock?: TurnClock | null;
-  options?: GameOptions;
+  options?: TableOptions;
   /** player-only fields */
   yourSeat?: Seat;
   legalMoves?: TMove[];
@@ -30,8 +30,6 @@ export interface TvViewProps<TView = unknown> {
   state: LiveState<TView>;
 }
 
-/** Table settings, already defaulted — game UIs never have to null-check them. */
-export type TableOptions = GameOptions;
 
 export interface GameUi {
   slug: string;

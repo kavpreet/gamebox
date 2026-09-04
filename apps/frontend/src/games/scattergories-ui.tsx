@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { ScattergoriesPublic, ScattergoriesMove } from '@gamebox/game-scattergories';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, WinnerBanner } from './common.js';
+import { seatName, SeatDot, WinnerBanner } from './common.js';
 
 type ScatView = ScattergoriesPublic & { yourAnswers: string[] | null };
 
@@ -10,7 +10,7 @@ function Scoreboard({ view, state }: { view: ScatView; state: { summary: TvViewP
     <>
       {view.order.map((s) => (
         <div key={s} className={`tv-player-chip ${state.activeSeats.includes(s) ? 'active' : ''}`}>
-          <span className={`token seat-color-${s % 6}`} />
+          <SeatDot summary={state.summary} seat={s} />
           <span className="grow">
             {seatName(state.summary, s)}
             {view.phase !== 'DONE' && view.submitted.includes(s) && <span className="dim small"> ✓</span>}
@@ -32,7 +32,10 @@ function TvView({ state }: TvViewProps<ScatView>) {
       <div className="tv-board" style={{ flexDirection: 'column', gap: '2vmin', padding: '3vmin', justifyContent: 'flex-start', overflow: 'auto' }}>
         <h2 style={{ margin: 0 }}>
           Round {view.round}/{view.totalRounds} — letter{' '}
-          <span style={{ color: 'var(--gold)', fontSize: '1.6em' }}>{view.letter}</span>
+          <span style={{
+            color: 'var(--gold)', fontSize: '1.8em', fontWeight: 900,
+            textShadow: '0 0 24px rgba(255,185,48,0.5)',
+          }}>{view.letter}</span>
         </h2>
         {view.phase === 'ANSWER' && (
           <>
@@ -196,8 +199,8 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<ScatView, S
       )}
       {state.status === 'active' && submitted && (
         <div className="card">
-          <p className="dim center">
-            Waiting for {view.order.filter((s) => !view.submitted.includes(s)).map((s) => seatName(state.summary, s)).join(', ')}…
+          <p className="waiting">
+            ✓ Submitted — waiting for {view.order.filter((s) => !view.submitted.includes(s)).map((s) => seatName(state.summary, s)).join(', ')}
           </p>
         </div>
       )}

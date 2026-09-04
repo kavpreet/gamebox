@@ -79,6 +79,7 @@ function reveal(state: State, index: number): CardKind {
 export const codenames: GameModule<CodenamesPublic, Hidden | Record<string, never>, CodenamesMove> = {
   slug: 'codenames',
   displayName: 'Codenames',
+  description: 'Spymasters give one-word clues; teams race to find their agents.',
   rulesVersion: '1.0.0',
   minPlayers: 4,
   maxPlayers: 10,

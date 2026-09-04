@@ -6,7 +6,7 @@ import { RoomService, RoomServiceError } from './services/room-service.js';
 import { AdminService, AdminServiceError } from './services/admin-service.js';
 import { listGames } from './games/registry.js';
 import { config, isGoogleEnabled, isAdminEmail } from './config.js';
-import type { GameOptions } from '@gamebox/shared-types';
+import type { TableOptions } from '@gamebox/shared-types';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -125,9 +125,11 @@ export function buildHttpApp(
       listGames().map((m) => ({
         slug: m.slug,
         displayName: m.displayName,
+        description: m.description ?? '',
         minPlayers: m.minPlayers,
         maxPlayers: m.maxPlayers,
         teams: m.teams ?? 'none',
+        options: m.options ?? [],
         supportsManual: Boolean(m.supportsManual),
       })),
     );
@@ -139,7 +141,7 @@ export function buildHttpApp(
       const summary = await games.createGame(
         req.userId!,
         String(req.body.gameType ?? ''),
-        (req.body.options ?? {}) as Partial<GameOptions>,
+        (req.body.table ?? {}) as Partial<TableOptions>,
       );
       res.status(201).json(summary);
     } catch (err) {
@@ -176,20 +178,20 @@ export function buildHttpApp(
   // Table settings — how the game *feels* (manual pieces, turn clock,
   // animation). Host-only and lobby-only: the runtime freezes its own copy at
   // start so a mid-game change can't desync the clock.
-  app.get('/api/games/:id/options', requireUser, async (req, res, next) => {
+  app.get('/api/games/:id/table-options', requireUser, async (req, res, next) => {
     try {
-      res.json(await games.getOptions(String(req.params.id)));
+      res.json(await games.getTableOptions(String(req.params.id)));
     } catch (err) {
       next(err);
     }
   });
 
-  app.post('/api/games/:id/options', requireUser, async (req, res, next) => {
+  app.post('/api/games/:id/table-options', requireUser, async (req, res, next) => {
     try {
-      const opts = await games.setOptions(
+      const opts = await games.setTableOptions(
         String(req.params.id),
         req.userId!,
-        (req.body ?? {}) as Partial<GameOptions>,
+        (req.body ?? {}) as Partial<TableOptions>,
       );
       await onGameChanged(String(req.params.id)).catch(() => {});
       res.json(opts);
@@ -201,6 +203,29 @@ export function buildHttpApp(
   app.post('/api/games/:id/teams', requireUser, async (req, res, next) => {
     try {
       const summary = await games.setTeams(String(req.params.id), req.userId!, req.body.teams ?? {});
+      await onGameChanged(summary.id);
+      res.json(summary);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/games/:id/options', requireUser, async (req, res, next) => {
+    try {
+      const patch = (req.body.options ?? {}) as Record<string, unknown>;
+      const summary = await games.setOptions(String(req.params.id), req.userId!, patch);
+      await onGameChanged(summary.id);
+      res.json(summary);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/games/:id/appearance', requireUser, async (req, res, next) => {
+    try {
+      const color = req.body.color === undefined ? null : req.body.color === null ? null : String(req.body.color);
+      const icon = req.body.icon === undefined ? null : req.body.icon === null ? null : String(req.body.icon);
+      const summary = await games.setAppearance(String(req.params.id), req.userId!, color, icon);
       await onGameChanged(summary.id);
       res.json(summary);
     } catch (err) {
@@ -220,8 +245,14 @@ export function buildHttpApp(
 
   app.post('/api/games/:id/abandon', requireUser, async (req, res, next) => {
     try {
-      await games.abandonGame(String(req.params.id), req.userId!);
-      await onGameChanged(String(req.params.id));
+      const gameId = String(req.params.id);
+      await games.abandonGame(gameId, req.userId!);
+      await onGameChanged(gameId);
+      // free any TVs that were showing this game
+      for (const room of await rooms.roomsShowing(gameId)) {
+        await rooms.assignGame(room.pairingCode, null);
+        await onRoomAssigned(room.pairingCode, null);
+      }
       res.json({ ok: true });
     } catch (err) {
       next(err);

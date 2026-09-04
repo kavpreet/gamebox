@@ -24,12 +24,18 @@ export interface GamesTable {
   version: number; // optimistic-concurrency counter == last move seq
   current_state: string; // JSON RuntimeSnapshot (server-only, never sent raw)
   final_result: string | null; // JSON EndResult
+  /** JSON GameOptions — the house rules picked in the lobby (null = all defaults) */
+  options: string | null;
+  /**
+   * JSON TableOptions — how the match is played (manual pieces, clock,
+   * animation). A separate column from `options` because it is a different
+   * axis: what the rules are, versus how it feels to sit at the table.
+   */
+  table_options: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
   ended_at: string | null;
-  /** JSON GameOptions chosen by the host in the lobby (manual mode, clock, …). */
-  options: string | null;
 }
 
 export interface GamePlayersTable {
@@ -42,6 +48,10 @@ export interface GamePlayersTable {
   connected: number; // 0/1 (SQLite has no boolean)
   eliminated_at: string | null;
   last_seen_at: string | null;
+  /** hex color from SEAT_COLOR_PALETTE; null = not customized yet */
+  color: string | null;
+  /** an emoji, or null = no icon */
+  icon: string | null;
 }
 
 export interface MovesTable {

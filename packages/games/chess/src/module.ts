@@ -52,6 +52,7 @@ function refresh(pub: ChessPublic, chess: Chess): void {
 export const chess: GameModule<ChessPublic, ChessPrivate, ChessMove> = {
   slug: 'chess',
   displayName: 'Chess',
+  description: 'The royal game — checkmate the enemy king.',
   rulesVersion: '1.0.0',
   minPlayers: 2,
   maxPlayers: 2,
