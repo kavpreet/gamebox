@@ -83,7 +83,7 @@ export const chess: GameModule<ChessPublic, ChessPrivate, ChessMove> = {
   },
 
   moves: {
-    MOVE({ state, seat, payload }) {
+    MOVE({ state, seat, payload, emit }) {
       const pub = state.public;
       if (pub.result !== null) throw new IllegalMove('Game is over');
       const mySide = seat === 0 ? 'w' : 'b';
@@ -101,6 +101,16 @@ export const chess: GameModule<ChessPublic, ChessPrivate, ChessMove> = {
       pub.history.push(made.san);
       pub.lastMove = { from: made.from, to: made.to };
       refresh(pub, c);
+      // A capture is the one chess event that is easy to miss on a shared
+      // screen, so it gets its own beat rather than riding along with the move.
+      emit({
+        kind: made.captured ? 'capture' : 'move',
+        seat,
+        text: made.san,
+        data: { from: made.from, to: made.to, captured: made.captured ?? null },
+        holdMs: made.captured ? 1200 : 800,
+      });
+      if (pub.inCheck) emit({ kind: 'reveal', seat, text: 'check!', holdMs: 1400 });
     },
   },
 

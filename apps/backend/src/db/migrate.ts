@@ -1,5 +1,23 @@
 import type { Kysely } from 'kysely';
 import type { Database } from './schema.js';
+import { config } from '../config.js';
+import { nowIso } from './index.js';
+
+/**
+ * `ALTER TABLE ... ADD COLUMN` has no IF NOT EXISTS in SQLite, so introspect
+ * first. Keeps migrateAppTables safe to run on every boot, like the rest of it.
+ */
+async function addColumnIfMissing(
+  db: Kysely<Database>,
+  table: string,
+  column: string,
+  build: (b: ReturnType<Kysely<Database>['schema']['alterTable']>) => unknown,
+): Promise<void> {
+  const tables = await db.introspection.getTables();
+  const t = tables.find((x) => x.name === table);
+  if (!t || t.columns.some((c) => c.name === column)) return;
+  await (build(db.schema.alterTable(table)) as { execute: () => Promise<unknown> }).execute();
+}
 
 /**
  * Idempotent app-table migrations (better-auth's own tables are migrated
@@ -87,6 +105,9 @@ export async function migrateAppTables(db: Kysely<Database>): Promise<void> {
   };
   for (const col of ['color', 'icon']) await addColumn('game_players', col);
   await addColumn('games', 'options');
+  // How the match is *played* (manual pieces, turn clock, animation) — a
+  // separate axis from the house rules in `options`, so a separate column.
+  await addColumn('games', 'table_options');
 
   await db.schema
     .createTable('moves')
@@ -125,4 +146,37 @@ export async function migrateAppTables(db: Kysely<Database>): Promise<void> {
     .column('pairing_code')
     .unique()
     .execute();
+
+  // TV room auth (added after the rooms table shipped without it).
+  await addColumnIfMissing(db, 'rooms', 'pin_hash', (b) => b.addColumn('pin_hash', 'text'));
+  await addColumnIfMissing(db, 'rooms', 'token_epoch', (b) =>
+    b.addColumn('token_epoch', 'integer', (c) => c.notNull().defaultTo(0)),
+  );
+
+  await db.schema
+    .createTable('allowed_emails')
+    .ifNotExists()
+    .addColumn('email', 'text', (c) => c.primaryKey())
+    .addColumn('added_by', 'text')
+    .addColumn('added_at', 'text', (c) => c.notNull())
+    .execute();
+}
+
+/**
+ * Copies ALLOWED_EMAILS into the DB allowlist once, so an existing deploy (or a
+ * brand-new one) always has someone who can sign in. After the first boot the
+ * table is authoritative — removing someone in /admin must not be undone on the
+ * next restart, so this only ever inserts rows that are absent, and only while
+ * the table is still empty.
+ */
+export async function seedAllowlist(db: Kysely<Database>): Promise<number> {
+  const seeds = [...new Set([...config.allowedEmails, ...config.adminEmails])];
+  if (seeds.length === 0) return 0;
+  const existing = await db.selectFrom('allowed_emails').select('email').execute();
+  if (existing.length > 0) return 0;
+  await db
+    .insertInto('allowed_emails')
+    .values(seeds.map((email) => ({ email, added_by: null, added_at: nowIso() })))
+    .execute();
+  return seeds.length;
 }

@@ -1,4 +1,12 @@
-import type { GameModule, GameOptions, GameState, Seat, SeededRandom } from '@gamebox/core-engine';
+import type {
+  GameModule,
+  GameOptions,
+  GameState,
+  Seat,
+  SeededRandom,
+  EmitBeat,
+  BeatKind,
+} from '@gamebox/core-engine';
 import { IllegalMove } from '@gamebox/core-engine';
 import {
   BOARD, JAIL_POSITION, GO_SALARY, JAIL_FINE,
@@ -68,7 +76,7 @@ export interface MonopolyPublic {
   properties: Record<number, OwnedProperty>;
   order: Seat[];
   turnIndex: number;
-  phase: 'ROLL' | 'ACT' | 'AUCTION' | 'DEBT';
+  phase: 'ROLL' | 'WALK' | 'PAY' | 'ACT' | 'AUCTION' | 'DEBT';
   lastRoll: { d1: number; d2: number } | null;
   doubles: boolean;
   pendingBuy: number | null;
@@ -76,7 +84,18 @@ export interface MonopolyPublic {
   debt: { seat: Seat; amount: number; creditor: Seat | null } | null;
   pendingTrade: Trade | null;
   lastCard: string | null;
+  /** Manual mode: squares still to walk out of the roll just thrown. */
+  pendingWalk: { seat: Seat; remaining: number; total: number; diceTotal: number } | null;
+  /**
+   * Manual mode: a charge the player must physically hand over. Distinct from
+   * `debt`, which is the *can't pay* case and already gated a confirmation.
+   */
+  pendingPayment: { seat: Seat; to: Seat | null; amount: number; reason: string } | null;
+  /** Whether this table is being played by hand. */
+  manual: boolean;
   lastEvent: string | null;
+  /** Seat the log line belongs to, so the UI can name the actor (null = the bank). */
+  lastEventSeat: Seat | null;
   winner: Seat | null;
 }
 
@@ -84,6 +103,8 @@ export type MonopolyPrivate = Record<string, never>;
 
 export type MonopolyMove =
   | { kind: 'ROLL' }
+  | { kind: 'STEP_TOKEN' }
+  | { kind: 'PAY' }
   | { kind: 'BUY' }
   | { kind: 'DECLINE_BUY' }
   | { kind: 'BID'; amount: number }
@@ -167,47 +188,153 @@ function payBank(pub: MonopolyPublic, amount: number): void {
   if (rulesOf(pub).freeParking) pub.freeParkingPot += amount;
 }
 
-/** Transfer `amount` from seat; enter DEBT phase when cash is short. */
-function charge(pub: MonopolyPublic, seat: Seat, amount: number, creditor: Seat | null): void {
+/**
+ * Record a log line together with the seat that caused it (null = the bank),
+ * and preserve it as a beat.
+ *
+ * `lastEvent` is a single slot that each later effect overwrites — which is
+ * exactly why a six-step roll used to arrive as one line. Emitting keeps the
+ * slot for the board's status text *and* preserves the step in order, so the
+ * client can replay the whole story.
+ */
+function say(
+  pub: MonopolyPublic,
+  seat: Seat | null,
+  text: string,
+  emit?: EmitBeat,
+  opts: { kind?: BeatKind; data?: Record<string, unknown>; holdMs?: number } = {},
+): void {
+  pub.lastEvent = text;
+  pub.lastEventSeat = seat;
+  emit?.({ kind: opts.kind ?? 'say', seat, text, data: opts.data, holdMs: opts.holdMs });
+}
+
+/**
+ * Transfer `amount` from seat; enter DEBT phase when cash is short.
+ *
+ * `gate` is the manual-mode hook: an ordinary charge the player *can* afford
+ * stops and waits for them to hand it over, instead of being silently debited
+ * as part of somebody else's dice roll. Charges the player already opted into
+ * by pressing a button (the jail fine, a purchase) pass gate=false — asking
+ * twice would be noise, not weight.
+ */
+function charge(
+  pub: MonopolyPublic,
+  seat: Seat,
+  amount: number,
+  creditor: Seat | null,
+  emit: EmitBeat,
+  opts: { reason?: string; gate?: boolean } = {},
+): void {
   const p = pub.players[seat]!;
-  if (p.cash >= amount) {
-    p.cash -= amount;
-    if (creditor !== null) pub.players[creditor]!.cash += amount;
-    else payBank(pub, amount);
-  } else {
+  const reason = opts.reason ?? 'a payment';
+  if (p.cash < amount) {
     pub.debt = { seat, amount, creditor };
     pub.phase = 'DEBT';
+    say(pub, seat, `can't cover $${amount} for ${reason} — must raise cash`, emit, {
+      kind: 'money',
+      data: { amount: -amount, to: creditor },
+      holdMs: 1600,
+    });
+    return;
+  }
+  if (opts.gate && pub.manual) {
+    pub.pendingPayment = { seat, to: creditor, amount, reason };
+    pub.phase = 'PAY';
+    say(pub, seat, `owes $${amount} — ${reason}`, emit, { holdMs: 900 });
+    return;
+  }
+  settleCash(pub, seat, amount, creditor, reason, emit);
+}
+
+/** The actual movement of money, shared by automatic and confirmed payments. */
+function settleCash(
+  pub: MonopolyPublic,
+  seat: Seat,
+  amount: number,
+  creditor: Seat | null,
+  reason: string,
+  emit: EmitBeat,
+): void {
+  pub.players[seat]!.cash -= amount;
+  if (creditor !== null) pub.players[creditor]!.cash += amount;
+  else payBank(pub, amount);
+  say(pub, seat, `pays $${amount} — ${reason}`, emit, {
+    kind: 'money',
+    data: { amount: -amount, from: seat, to: creditor },
+    holdMs: 1100,
+  });
+}
+
+function credit(
+  pub: MonopolyPublic,
+  seat: Seat,
+  amount: number,
+  emit?: EmitBeat,
+  reason?: string,
+): void {
+  pub.players[seat]!.cash += amount;
+  if (emit && amount > 0) {
+    say(pub, seat, reason ? `collects $${amount} — ${reason}` : `collects $${amount}`, emit, {
+      kind: 'money',
+      data: { amount, to: seat },
+      holdMs: 1000,
+    });
   }
 }
 
-function credit(pub: MonopolyPublic, seat: Seat, amount: number): void {
-  pub.players[seat]!.cash += amount;
-}
-
-function sendToJail(pub: MonopolyPublic, seat: Seat): void {
+function sendToJail(pub: MonopolyPublic, seat: Seat, emit?: EmitBeat): void {
   const p = pub.players[seat]!;
+  const from = p.position;
   p.position = JAIL_POSITION;
   p.inJail = true;
   p.jailTurns = 0;
   pub.doubles = false; // no extra roll
-  pub.lastEvent = 'went to jail';
+  pub.pendingWalk = null; // a trip to jail cancels any walk still owed
+  say(pub, seat, 'went to jail', emit, {
+    kind: 'jail',
+    data: { from, to: JAIL_POSITION, teleport: true },
+    holdMs: 1600,
+  });
 }
 
-function drawCard(pub: MonopolyPublic, seat: Seat, deck: 'chance' | 'chest', rng: SeededRandom, diceTotal: number): void {
+function drawCard(
+  pub: MonopolyPublic,
+  seat: Seat,
+  deck: 'chance' | 'chest',
+  rng: SeededRandom,
+  diceTotal: number,
+  emit: EmitBeat,
+): void {
   const cards = deck === 'chance' ? CHANCE_CARDS : CHEST_CARDS;
   const card = cards[rng.int(0, cards.length - 1)]!;
   pub.lastCard = card.text;
+  const deckName = deck === 'chance' ? 'Chance' : 'Community Chest';
+  // The draw gets a long hold: on a real table everyone reads the card before
+  // anything happens. The effects below still overwrite `lastEvent`, but each
+  // now survives as its own beat.
+  say(pub, seat, `drew ${deckName}`, emit, {
+    kind: 'card',
+    data: { deck, title: deckName, text: card.text },
+    holdMs: 2200,
+  });
   const p = pub.players[seat]!;
   const e = card.effect;
   if (e.kind === 'money') {
-    if (e.amount >= 0) credit(pub, seat, e.amount);
-    else charge(pub, seat, -e.amount, null);
+    if (e.amount >= 0) credit(pub, seat, e.amount, emit, deckName);
+    else charge(pub, seat, -e.amount, null, emit, { reason: deckName, gate: true });
   } else if (e.kind === 'move-to') {
-    if (e.position < p.position) credit(pub, seat, rulesOf(pub).goSalary); // passed GO
+    if (e.position < p.position) credit(pub, seat, rulesOf(pub).goSalary, emit, 'passing GO');
+    const from = p.position;
     p.position = e.position;
-    resolveLanding(pub, seat, rng, diceTotal);
+    say(pub, seat, `moves to ${space(e.position).name}`, emit, {
+      kind: 'move',
+      data: { from, to: e.position, teleport: true },
+      holdMs: 1200,
+    });
+    resolveLanding(pub, seat, rng, diceTotal, emit);
   } else if (e.kind === 'go-to-jail') {
-    sendToJail(pub, seat);
+    sendToJail(pub, seat, emit);
   } else if (e.kind === 'repairs') {
     let cost = 0;
     for (const [posStr, prop] of Object.entries(pub.properties)) {
@@ -216,18 +343,31 @@ function drawCard(pub: MonopolyPublic, seat: Seat, deck: 'chance' | 'chest', rng
       else cost += prop.houses * e.perHouse;
       void posStr;
     }
-    if (cost > 0) charge(pub, seat, cost, null);
+    if (cost > 0) charge(pub, seat, cost, null, emit, { reason: 'street repairs', gate: true });
   } else if (e.kind === 'collect-from-each') {
     for (const other of aliveSeats(pub)) {
       if (other === seat) continue;
       const pay = Math.min(e.amount, pub.players[other]!.cash);
       pub.players[other]!.cash -= pay;
-      credit(pub, seat, pay);
+      pub.players[seat]!.cash += pay;
+      emit({
+        kind: 'money',
+        seat: other,
+        text: `hands over $${pay}`,
+        data: { amount: -pay, from: other, to: seat },
+        holdMs: 800,
+      });
     }
   }
 }
 
-function resolveLanding(pub: MonopolyPublic, seat: Seat, rng: SeededRandom, diceTotal: number): void {
+function resolveLanding(
+  pub: MonopolyPublic,
+  seat: Seat,
+  rng: SeededRandom,
+  diceTotal: number,
+  emit: EmitBeat,
+): void {
   const p = pub.players[seat]!;
   const rules = rulesOf(pub);
   const sp = space(p.position);
@@ -238,52 +378,69 @@ function resolveLanding(pub: MonopolyPublic, seat: Seat, rng: SeededRandom, dice
       const prop = pub.properties[p.position];
       if (!prop) {
         pub.pendingBuy = p.position;
+        say(pub, seat, `${sp.name} is unowned — $${sp.price}`, emit, {
+          kind: 'reveal',
+          data: { position: p.position, price: sp.price },
+          holdMs: 1300,
+        });
       } else if (prop.owner !== seat && !prop.mortgaged) {
         // House rule: a landlord sitting in jail collects nothing.
         if (rules.jailRentFree && pub.players[prop.owner]!.inJail) {
-          pub.lastEvent = `${sp.name}'s owner is in jail — rent free!`;
+          say(pub, seat, `${sp.name}'s owner is in jail — rent free!`, emit, { holdMs: 1300 });
           break;
         }
         const rent = rentFor(pub, p.position, diceTotal);
-        pub.lastEvent = `owes $${rent} rent on ${sp.name}`;
-        charge(pub, seat, rent, prop.owner);
+        charge(pub, seat, rent, prop.owner, emit, { reason: `rent on ${sp.name}`, gate: true });
+      } else if (prop.owner === seat) {
+        say(pub, seat, `lands on their own ${sp.name}`, emit, { holdMs: 900 });
       }
       break;
     }
     case 'free-parking':
       if (rules.freeParking && pub.freeParkingPot > 0) {
-        pub.lastEvent = `scooped the $${pub.freeParkingPot} Free Parking jackpot!`;
-        credit(pub, seat, pub.freeParkingPot);
+        const pot = pub.freeParkingPot;
         pub.freeParkingPot = 0;
+        pub.players[seat]!.cash += pot;
+        say(pub, seat, `scooped the $${pot} Free Parking jackpot!`, emit, {
+          kind: 'money',
+          data: { amount: pot, to: seat },
+          holdMs: 1800,
+        });
       }
       break;
     case 'go':
       if (rules.goDoubleOnLanding) {
-        pub.lastEvent = `landed right on GO — double salary, $${rules.goSalary}!`;
-        credit(pub, seat, rules.goSalary);
+        pub.players[seat]!.cash += rules.goSalary;
+        say(pub, seat, `landed right on GO — double salary, $${rules.goSalary}!`, emit, {
+          kind: 'money',
+          data: { amount: rules.goSalary, to: seat },
+          holdMs: 1600,
+        });
       }
       break;
     case 'tax':
-      pub.lastEvent = `pays ${sp.name} $${sp.taxAmount}`;
-      charge(pub, seat, sp.taxAmount!, null);
+      charge(pub, seat, sp.taxAmount!, null, emit, { reason: sp.name, gate: true });
       break;
     case 'chance':
-      drawCard(pub, seat, 'chance', rng, diceTotal);
+      drawCard(pub, seat, 'chance', rng, diceTotal, emit);
       break;
     case 'chest':
-      drawCard(pub, seat, 'chest', rng, diceTotal);
+      drawCard(pub, seat, 'chest', rng, diceTotal, emit);
       break;
     case 'go-to-jail':
-      sendToJail(pub, seat);
+      sendToJail(pub, seat, emit);
       break;
     default:
+      say(pub, seat, `rests on ${sp.name}`, emit, { holdMs: 800 });
       break;
   }
 }
 
-function advanceTurn(pub: MonopolyPublic): void {
+function advanceTurn(pub: MonopolyPublic, emit?: EmitBeat): void {
   pub.pendingBuy = null;
   pub.lastCard = null;
+  pub.pendingWalk = null;
+  pub.pendingPayment = null;
   if (pub.doubles && !pub.players[currentSeat(pub)]!.inJail && !pub.players[currentSeat(pub)]!.bankrupt) {
     pub.phase = 'ROLL'; // extra roll, same player
     pub.doubles = false;
@@ -294,6 +451,42 @@ function advanceTurn(pub: MonopolyPublic): void {
     pub.turnIndex = (pub.turnIndex + 1) % pub.order.length;
   } while (pub.players[currentSeat(pub)]!.bankrupt);
   pub.phase = 'ROLL';
+  emit?.({ kind: 'turn', seat: currentSeat(pub), text: 'to roll', holdMs: 700 });
+}
+
+/**
+ * One square of travel: the GO salary is paid the moment the token crosses it,
+ * which in manual mode means the player watches it happen on the right step
+ * rather than finding it already in the total.
+ */
+function stepToken(pub: MonopolyPublic, seat: Seat, emit: EmitBeat): void {
+  const p = pub.players[seat]!;
+  const from = p.position;
+  p.position = (p.position + 1) % BOARD.length;
+  if (p.position === 0) credit(pub, seat, rulesOf(pub).goSalary, emit, 'passing GO');
+  emit({
+    kind: 'move',
+    seat,
+    text: space(p.position).name,
+    data: { from, to: p.position, steps: 1 },
+    holdMs: 240,
+  });
+}
+
+/** Land the token and resolve the square, once the walk is finished. */
+function finishWalk(
+  pub: MonopolyPublic,
+  seat: Seat,
+  rng: SeededRandom,
+  diceTotal: number,
+  emit: EmitBeat,
+): void {
+  pub.pendingWalk = null;
+  say(pub, seat, `lands on ${space(pub.players[seat]!.position).name}`, emit, { holdMs: 700 });
+  resolveLanding(pub, seat, rng, diceTotal, emit);
+  // resolveLanding may have moved us to DEBT, PAY or jail; only an otherwise
+  // uneventful landing returns the turn to the player's own hands.
+  if (pub.phase === 'ROLL' || pub.phase === 'WALK') pub.phase = 'ACT';
 }
 
 function checkWinner(pub: MonopolyPublic): void {
@@ -301,7 +494,7 @@ function checkWinner(pub: MonopolyPublic): void {
   if (alive.length === 1) pub.winner = alive[0] as Seat;
 }
 
-function doBankruptcy(pub: MonopolyPublic, seat: Seat, creditor: Seat | null): void {
+function doBankruptcy(pub: MonopolyPublic, seat: Seat, creditor: Seat | null, emit?: EmitBeat): void {
   const p = pub.players[seat]!;
   p.bankrupt = true;
   if (creditor !== null) credit(pub, creditor, p.cash);
@@ -317,7 +510,9 @@ function doBankruptcy(pub: MonopolyPublic, seat: Seat, creditor: Seat | null): v
     }
   }
   pub.debt = null;
-  pub.lastEvent = 'went bankrupt';
+  pub.pendingWalk = null;
+  pub.pendingPayment = null;
+  say(pub, seat, 'went bankrupt', emit, { kind: 'capture', holdMs: 2200 });
   checkWinner(pub);
   if (pub.winner === null && currentSeat(pub) === seat) {
     advanceTurn(pub);
@@ -343,7 +538,8 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
   slug: 'monopoly',
   displayName: 'Monopoly',
   description: 'Buy, build, and bankrupt your friends around the board.',
-  rulesVersion: '1.1.0',
+  rulesVersion: '1.2.0',
+  supportsManual: true,
   minPlayers: 2,
   maxPlayers: 6,
   teams: 'none',
@@ -400,7 +596,7 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
     },
   ],
 
-  setup(seats, _rng, options) {
+  setup(seats, _rng, options, table) {
     const players: Record<Seat, MonopolyPlayer> = {};
     const priv: Record<Seat, MonopolyPrivate> = {};
     const rules = monopolyRules(options);
@@ -430,7 +626,11 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
         debt: null,
         pendingTrade: null,
         lastCard: null,
+        pendingWalk: null,
+        pendingPayment: null,
+        manual: Boolean(table?.manual),
         lastEvent: null,
+        lastEventSeat: null,
         winner: null,
       },
       private: priv,
@@ -449,7 +649,7 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
   },
 
   moves: {
-    ROLL({ state, seat, rng }) {
+    ROLL({ state, seat, rng, emit, table }) {
       const pub = state.public;
       requireSeatTurn(pub, seat);
       if (pub.phase !== 'ROLL' || seat !== currentSeat(pub)) throw new IllegalMove('Not your roll');
@@ -459,22 +659,34 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       const d2 = rng.int(1, 6);
       pub.lastRoll = { d1, d2 };
       const p = pub.players[seat]!;
+      emit({
+        kind: 'dice',
+        seat,
+        text: d1 === d2 ? `throws ${d1} + ${d2} — doubles!` : `throws ${d1} + ${d2} = ${d1 + d2}`,
+        data: { dice: [d1, d2] },
+        holdMs: 1400,
+      });
 
       if (p.inJail) {
         if (d1 === d2) {
           p.inJail = false;
           p.jailTurns = 0;
-          pub.lastEvent = 'rolled doubles — out of jail!';
+          say(pub, seat, 'rolled doubles — out of jail!', emit, { kind: 'reveal', holdMs: 1400 });
         } else {
           p.jailTurns += 1;
           if (p.jailTurns >= 3) {
-            charge(pub, seat, JAIL_FINE, null);
+            // The fine after three failed throws is not optional, so it is not
+            // gated — there is no decision here to make physical.
+            charge(pub, seat, JAIL_FINE, null, emit, { reason: 'the jail fine' });
             if ((pub.phase as string) === 'DEBT') return; // couldn't pay the fine
             p.inJail = false;
             p.jailTurns = 0;
-            pub.lastEvent = 'paid the fine after 3 tries';
+            say(pub, seat, 'paid the fine after 3 tries', emit, { holdMs: 1200 });
           } else {
-            pub.lastEvent = 'stuck in jail';
+            say(pub, seat, `stuck in jail (try ${p.jailTurns} of 3)`, emit, {
+              kind: 'jail',
+              holdMs: 1300,
+            });
             pub.phase = 'ACT';
             return;
           }
@@ -491,7 +703,8 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
         p.jailTurns += 1; // reused as consecutive-doubles counter while NOT in jail
         if (p.jailTurns >= 3) {
           p.jailTurns = 0;
-          sendToJail(pub, seat);
+          say(pub, seat, 'three doubles in a row!', emit, { holdMs: 1100 });
+          sendToJail(pub, seat, emit);
           pub.phase = 'ACT';
           return;
         }
@@ -503,15 +716,72 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
 
       function movePlayer(): void {
         const total = d1 + d2;
+        if (table.manual) {
+          // The throw only commits the distance. The player walks it.
+          pub.pendingWalk = { seat, remaining: total, total, diceTotal: total };
+          pub.phase = 'WALK';
+          say(pub, seat, `walks ${total} — tap to step`, emit, { holdMs: 700 });
+          return;
+        }
         const before = p.position;
         p.position = (p.position + total) % BOARD.length;
-        if (p.position < before) credit(pub, seat, rulesOf(pub).goSalary);
-        resolveLanding(pub, seat, rng, total);
+        if (p.position < before) credit(pub, seat, rulesOf(pub).goSalary, emit, 'passing GO');
+        say(pub, seat, `moves ${total} to ${space(p.position).name}`, emit, {
+          kind: 'move',
+          data: { from: before, to: p.position, steps: total },
+          holdMs: 300 + total * 200,
+        });
+        resolveLanding(pub, seat, rng, total, emit);
         if (pub.phase === 'ROLL') pub.phase = 'ACT';
       }
     },
 
-    BUY({ state, seat }) {
+    /**
+     * Manual mode: walk the token one square. The server holds the remaining
+     * count from the throw, so this can never move further than the dice said
+     * — it is the physical act, not a second chance to choose a destination.
+     */
+    STEP_TOKEN({ state, seat, rng, emit }) {
+      const pub = state.public;
+      requireSeatTurn(pub, seat);
+      if (pub.phase !== 'WALK' || !pub.pendingWalk) throw new IllegalMove('Throw the dice first');
+      if (pub.pendingWalk.seat !== seat) throw new IllegalMove('Not your token');
+
+      stepToken(pub, seat, emit);
+      pub.pendingWalk.remaining -= 1;
+      if (pub.pendingWalk.remaining > 0) return;
+      finishWalk(pub, seat, rng, pub.pendingWalk.diceTotal, emit);
+    },
+
+    /**
+     * Manual mode: hand over a charge you can afford. Money a player has to
+     * physically pass across the table is money they notice leaving.
+     */
+    PAY({ state, seat, emit }) {
+      const pub = state.public;
+      requireSeatTurn(pub, seat);
+      const owed = pub.pendingPayment;
+      if (!owed || pub.phase !== 'PAY') throw new IllegalMove('Nothing to pay');
+      if (owed.seat !== seat) throw new IllegalMove('Not your payment');
+
+      pub.pendingPayment = null;
+      if (pub.players[seat]!.cash < owed.amount) {
+        // Cash can drain between the charge and the tap (a trade, a mortgage
+        // recalled) — fall into the normal short-of-funds path rather than
+        // letting the confirmation overdraw them.
+        pub.debt = { seat, amount: owed.amount, creditor: owed.to };
+        pub.phase = 'DEBT';
+        say(pub, seat, `can no longer cover $${owed.amount}`, emit, {
+          kind: 'money',
+          holdMs: 1400,
+        });
+        return;
+      }
+      settleCash(pub, seat, owed.amount, owed.to, owed.reason, emit);
+      pub.phase = 'ACT';
+    },
+
+    BUY({ state, seat, emit }) {
       const pub = state.public;
       requireManagement(pub, seat);
       if (pub.pendingBuy === null) throw new IllegalMove('Nothing to buy');
@@ -522,26 +792,33 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       p.cash -= price;
       pub.properties[pos] = { owner: seat, houses: 0, mortgaged: false };
       pub.pendingBuy = null;
-      pub.lastEvent = `bought ${space(pos).name}`;
+      say(pub, seat, `bought ${space(pos).name} for $${price}`, emit, {
+        kind: 'build',
+        data: { position: pos, amount: -price },
+        holdMs: 1400,
+      });
     },
 
-    DECLINE_BUY({ state, seat }) {
+    DECLINE_BUY({ state, seat, emit }) {
       const pub = state.public;
       requireManagement(pub, seat);
       if (pub.pendingBuy === null) throw new IllegalMove('Nothing to decline');
       // House rule: no auctions — the property just stays unsold.
       if (rulesOf(pub).noAuctions) {
-        pub.lastEvent = `passed on ${space(pub.pendingBuy).name}`;
+        say(pub, seat, `passed on ${space(pub.pendingBuy).name}`, emit, { holdMs: 1200 });
         pub.pendingBuy = null;
         return;
       }
       pub.auction = { position: pub.pendingBuy, bids: {} };
       pub.pendingBuy = null;
       pub.phase = 'AUCTION';
-      pub.lastEvent = `${space(pub.auction.position).name} goes to auction — sealed bids!`;
+      say(pub, seat, `${space(pub.auction.position).name} goes to auction — sealed bids!`, emit, {
+        kind: 'reveal',
+        holdMs: 1600,
+      });
     },
 
-    BID({ state, seat, payload }) {
+    BID({ state, seat, payload, emit }) {
       const pub = state.public;
       requireSeatTurn(pub, seat);
       if (pub.phase !== 'AUCTION' || !pub.auction) throw new IllegalMove('No auction running');
@@ -563,15 +840,19 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       if (top > 0) {
         pub.players[winner]!.cash -= top;
         pub.properties[pub.auction.position] = { owner: winner, houses: 0, mortgaged: false };
-        pub.lastEvent = `auction won for $${top}`;
+        say(pub, winner, `won the auction for $${top}`, emit, {
+          kind: 'money',
+          data: { amount: -top, from: winner },
+          holdMs: 1800,
+        });
       } else {
-        pub.lastEvent = 'auction ended with no bids';
+        say(pub, null, 'auction ended with no bids', emit, { holdMs: 1400 });
       }
       pub.auction = null;
       pub.phase = 'ACT';
     },
 
-    BUILD({ state, seat, payload }) {
+    BUILD({ state, seat, payload, emit }) {
       const pub = state.public;
       requireManagement(pub, seat);
       const { position } = payload as { position: number };
@@ -589,10 +870,14 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       if (pub.players[seat]!.cash < cost) throw new IllegalMove('Not enough cash');
       pub.players[seat]!.cash -= cost;
       prop.houses += 1;
-      pub.lastEvent = `built on ${sp.name}`;
+      say(pub, seat, prop.houses === 5 ? `built a hotel on ${sp.name}` : `built a house on ${sp.name}`, emit, {
+        kind: 'build',
+        data: { position, houses: prop.houses },
+        holdMs: 1200,
+      });
     },
 
-    SELL_HOUSE({ state, seat, payload }) {
+    SELL_HOUSE({ state, seat, payload, emit }) {
       const pub = state.public;
       requireSeatTurn(pub, seat);
       // selling is allowed during DEBT too (that's the point) but only your own debt
@@ -608,10 +893,14 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       if (prop.houses < maxHouses) throw new IllegalMove('Sell evenly across the group');
       prop.houses -= 1;
       credit(pub, seat, Math.floor(sp.houseCost! / 2));
-      pub.lastEvent = `sold a house on ${sp.name}`;
+      say(pub, seat, `sold a house on ${sp.name}`, emit, {
+        kind: 'money',
+        data: { position, amount: Math.floor(sp.houseCost! / 2) },
+        holdMs: 1200,
+      });
     },
 
-    MORTGAGE({ state, seat, payload }) {
+    MORTGAGE({ state, seat, payload, emit }) {
       const pub = state.public;
       requireSeatTurn(pub, seat);
       if (pub.phase === 'DEBT' && pub.debt?.seat !== seat) throw new IllegalMove('Not your debt');
@@ -626,10 +915,14 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       }
       prop.mortgaged = true;
       credit(pub, seat, Math.floor(sp.price! / 2));
-      pub.lastEvent = `mortgaged ${sp.name}`;
+      say(pub, seat, `mortgaged ${sp.name}`, emit, {
+        kind: 'money',
+        data: { position, amount: Math.floor(sp.price! / 2) },
+        holdMs: 1200,
+      });
     },
 
-    UNMORTGAGE({ state, seat, payload }) {
+    UNMORTGAGE({ state, seat, payload, emit }) {
       const pub = state.public;
       requireManagement(pub, seat);
       const { position } = payload as { position: number };
@@ -640,10 +933,14 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       if (pub.players[seat]!.cash < cost) throw new IllegalMove('Not enough cash');
       pub.players[seat]!.cash -= cost;
       prop.mortgaged = false;
-      pub.lastEvent = `unmortgaged ${sp.name}`;
+      say(pub, seat, `unmortgaged ${sp.name}`, emit, {
+        kind: 'money',
+        data: { position, amount: -cost },
+        holdMs: 1200,
+      });
     },
 
-    PAY_JAIL({ state, seat }) {
+    PAY_JAIL({ state, seat, emit }) {
       const pub = state.public;
       requireSeatTurn(pub, seat);
       if (pub.phase !== 'ROLL' || seat !== currentSeat(pub)) throw new IllegalMove('Not now');
@@ -653,11 +950,15 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       p.cash -= JAIL_FINE;
       p.inJail = false;
       p.jailTurns = 0;
-      pub.lastEvent = 'paid the jail fine';
+      say(pub, seat, `paid the $${JAIL_FINE} jail fine`, emit, {
+        kind: 'money',
+        data: { amount: -JAIL_FINE },
+        holdMs: 1200,
+      });
       // still phase ROLL — they roll and move normally now
     },
 
-    PROPOSE_TRADE({ state, seat, payload }) {
+    PROPOSE_TRADE({ state, seat, payload, emit }) {
       const pub = state.public;
       requireManagement(pub, seat);
       const t = payload as unknown as Trade;
@@ -685,10 +986,10 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
         if (prop.houses > 0) throw new IllegalMove('Streets with buildings cannot be traded');
       }
       pub.pendingTrade = trade;
-      pub.lastEvent = 'proposed a trade';
+      say(pub, seat, 'proposed a trade', emit, { kind: 'reveal', holdMs: 1500 });
     },
 
-    RESPOND_TRADE({ state, seat, payload }) {
+    RESPOND_TRADE({ state, seat, payload, emit }) {
       const pub = state.public;
       requireSeatTurn(pub, seat);
       const trade = pub.pendingTrade;
@@ -696,30 +997,30 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       const { accept } = payload as { accept: boolean };
       pub.pendingTrade = null;
       if (!accept) {
-        pub.lastEvent = 'rejected the trade';
+        say(pub, seat, 'rejected the trade', emit, { holdMs: 1300 });
         return;
       }
       // re-validate cash (state may have changed) then execute
       if (pub.players[trade.from]!.cash < trade.giveCash || pub.players[trade.to]!.cash < trade.getCash) {
-        pub.lastEvent = 'trade fell through (not enough cash)';
+        say(pub, null, 'trade fell through (not enough cash)', emit, { holdMs: 1600 });
         return;
       }
       pub.players[trade.from]!.cash += trade.getCash - trade.giveCash;
       pub.players[trade.to]!.cash += trade.giveCash - trade.getCash;
       for (const pos of trade.giveProps) pub.properties[pos]!.owner = trade.to;
       for (const pos of trade.getProps) pub.properties[pos]!.owner = trade.from;
-      pub.lastEvent = 'trade accepted!';
+      say(pub, seat, 'trade accepted!', emit, { kind: 'reveal', holdMs: 1800 });
     },
 
-    CANCEL_TRADE({ state, seat }) {
+    CANCEL_TRADE({ state, seat, emit }) {
       const pub = state.public;
       const trade = pub.pendingTrade;
       if (!trade || trade.from !== seat) throw new IllegalMove('No trade of yours to cancel');
       pub.pendingTrade = null;
-      pub.lastEvent = 'withdrew the trade';
+      say(pub, seat, 'withdrew the trade', emit, { holdMs: 1100 });
     },
 
-    RESOLVE_DEBT({ state, seat }) {
+    RESOLVE_DEBT({ state, seat, emit }) {
       const pub = state.public;
       const debt = pub.debt;
       if (!debt || debt.seat !== seat) throw new IllegalMove('No debt to resolve');
@@ -730,7 +1031,11 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       else payBank(pub, debt.amount);
       pub.debt = null;
       pub.phase = 'ACT';
-      pub.lastEvent = 'settled the debt';
+      say(pub, seat, `settled the $${debt.amount} debt`, emit, {
+        kind: 'money',
+        data: { amount: -debt.amount, to: debt.creditor },
+        holdMs: 1500,
+      });
     },
 
     DECLARE_BANKRUPTCY({ state, seat }) {
@@ -791,6 +1096,11 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
 
     if (seat !== currentSeat(pub)) return [];
     const p = pub.players[seat]!;
+
+    // Manual mode: while a token is mid-walk or a charge is unpaid, the only
+    // thing that seat may do is the physical act in front of them.
+    if (pub.phase === 'WALK') return [{ kind: 'STEP_TOKEN' }];
+    if (pub.phase === 'PAY') return [{ kind: 'PAY' }];
 
     if (pub.phase === 'ROLL') {
       moves.push({ kind: 'ROLL' });
@@ -872,6 +1182,25 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       return;
     }
     if (currentSeat(pub) === seat) {
+      // A half-finished manual turn still has to settle, or the token would be
+      // stranded mid-walk and the rent never collected.
+      if (pub.pendingWalk) {
+        const p = pub.players[seat]!;
+        p.position = (p.position + pub.pendingWalk.remaining) % BOARD.length;
+        pub.pendingWalk = null;
+      }
+      if (pub.pendingPayment) {
+        const owed = pub.pendingPayment;
+        pub.pendingPayment = null;
+        if (pub.players[seat]!.cash >= owed.amount) {
+          pub.players[seat]!.cash -= owed.amount;
+          if (owed.to !== null) pub.players[owed.to]!.cash += owed.amount;
+          else payBank(pub, owed.amount);
+        } else {
+          doBankruptcy(pub, seat, owed.to);
+          return;
+        }
+      }
       if (pub.pendingBuy !== null) pub.pendingBuy = null; // implicit decline, no auction
       pub.doubles = false;
       advanceTurn(pub);

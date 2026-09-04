@@ -1,5 +1,18 @@
-import type { Seat, Viewer, GameStatus, DisconnectOption, GameOptions } from '@gamebox/shared-types';
-import { resolveGameOptions } from '@gamebox/shared-types';
+import type {
+  Seat,
+  Viewer,
+  GameStatus,
+  DisconnectOption,
+  Beat,
+  GameOptions,
+  TableOptions,
+  TurnClock,
+} from '@gamebox/shared-types';
+import {
+  DEFAULT_TABLE_OPTIONS,
+  normalizeTableOptions,
+  resolveGameOptions,
+} from '@gamebox/shared-types';
 import type { GameModule, GameState, EndResult } from './game-module.js';
 import { IllegalMove } from './game-module.js';
 import { createSeededRandom, type SeededRandom } from './rng.js';
@@ -24,6 +37,12 @@ export interface RuntimeSnapshot {
   activeSeats: Seat[];
   result: EndResult | null;
   removedSeats: Seat[];
+  /** Table settings frozen at start. Absent in snapshots written before they existed. */
+  table?: TableOptions;
+  /** ISO instant the current turn began — the anchor for the turn clock. */
+  turnStartedAt?: string;
+  /** Seats the clock is running against; a change here restarts the clock. */
+  clockSeats?: Seat[];
 }
 
 export interface ApplyMoveResult {
@@ -31,6 +50,8 @@ export interface ApplyMoveResult {
   status: GameStatus;
   activeSeats: Seat[];
   result: EndResult | null;
+  /** Ordered narration for this mutation, for the client to replay. */
+  beats: Beat[];
 }
 
 /**
@@ -45,6 +66,21 @@ export class GameRuntime {
   private status: GameStatus;
   private result: EndResult | null;
   private removedSeats: Set<Seat>;
+  private table: TableOptions;
+  private turnStartedAt: string;
+  private clockSeats: Seat[];
+  /** Beats emitted by the most recent mutation, handed to clients once. */
+  private beats: Beat[] = [];
+  /**
+   * The state as it was before the last player move, for a take-back.
+   *
+   * One step only. Deeper history would need the whole move log replayed from
+   * the seed to stay honest about the RNG, and one step is what a table
+   * actually allows — you can take back the move you just made, not the game.
+   * Held in memory rather than persisted: a take-back is a live, social act,
+   * and after a server restart there is nobody mid-protest.
+   */
+  private undoPoint: { snapshot: RuntimeSnapshot; seat: Seat; type: string } | null = null;
 
   constructor(
     public readonly module: GameModule<any, any, any>,
@@ -56,6 +92,9 @@ export class GameRuntime {
     this.status = snapshot.status;
     this.result = snapshot.result;
     this.removedSeats = new Set(snapshot.removedSeats);
+    this.table = normalizeTableOptions(snapshot.table);
+    this.turnStartedAt = snapshot.turnStartedAt ?? new Date().toISOString();
+    this.clockSeats = snapshot.clockSeats ?? snapshot.activeSeats;
   }
 
   static start(
@@ -63,18 +102,68 @@ export class GameRuntime {
     seats: { seat: Seat; team?: number }[],
     seed: number,
     options: GameOptions = {},
+    table?: Partial<TableOptions>,
   ): GameRuntime {
     const rng = createSeededRandom(seed);
-    const state = module.setup(seats, rng, resolveGameOptions(module.options ?? [], options));
+    const tableOpts = normalizeTableOptions({ ...DEFAULT_TABLE_OPTIONS, ...(table ?? {}) });
+    // A module that hasn't implemented the split moves can't honour manual
+    // mode; running it manually anyway would strand players waiting for a
+    // button that never appears.
+    if (!module.supportsManual) tableOpts.manual = false;
+    const state = module.setup(
+      seats,
+      rng,
+      resolveGameOptions(module.options ?? [], options),
+      tableOpts,
+    );
+    const activeSeats = module.activePlayers(state);
     return new GameRuntime(module, {
       state,
       rngState: rng.getState(),
       seq: 0,
       status: 'active',
-      activeSeats: module.activePlayers(state),
+      activeSeats,
       result: null,
       removedSeats: [],
+      table: tableOpts,
+      turnStartedAt: new Date().toISOString(),
+      clockSeats: activeSeats,
     });
+  }
+
+  /** How this table is played — pacing, manual pieces, clock. Not the rules. */
+  get tableOptions(): TableOptions {
+    return this.table;
+  }
+
+  /** Narration from the most recent mutation; reading it clears it. */
+  takeBeats(): Beat[] {
+    const b = this.beats;
+    this.beats = [];
+    return b;
+  }
+
+  /**
+   * The turn clock is generic machinery, so it lives here rather than in any
+   * module: it restarts whenever the set of seats that may act changes, which
+   * means a player handed the turn always gets the full allowance and a player
+   * partway through a multi-step manual turn is not punished for it.
+   */
+  clock(): TurnClock | null {
+    if (this.status !== 'active') return null;
+    const seats = this.activeSeats();
+    const deadline =
+      this.table.clock === 'off'
+        ? null
+        : new Date(Date.parse(this.turnStartedAt) + this.table.clockSeconds * 1000).toISOString();
+    return { mode: this.table.clock, startedAt: this.turnStartedAt, deadline, seats };
+  }
+
+  /** Seats whose allowance has run out — hard-mode enforcement only. */
+  expiredSeats(now = Date.now()): Seat[] {
+    const c = this.clock();
+    if (!c || c.mode !== 'hard' || !c.deadline) return [];
+    return Date.parse(c.deadline) <= now ? c.seats : [];
   }
 
   get currentSeq(): number {
@@ -130,8 +219,20 @@ export class GameRuntime {
     if (!moveFn) {
       throw new IllegalMove(`Unknown move type: ${type}`);
     }
-    moveFn({ state: this.state, seat, payload, rng: this.rng });
-    return this.afterMutation();
+    // Capture before mutating: the snapshot has to predate the move it undoes.
+    // structuredClone keeps the restored state from aliasing the live one,
+    // which would make the "undo" silently share objects with the new state.
+    this.undoPoint = { snapshot: structuredClone(this.snapshot()), seat, type };
+    const beats: Beat[] = [];
+    moveFn({
+      state: this.state,
+      seat,
+      payload,
+      rng: this.rng,
+      emit: (b) => beats.push(b),
+      table: this.table,
+    });
+    return this.afterMutation(beats);
   }
 
   /**
@@ -143,7 +244,9 @@ export class GameRuntime {
       throw new IllegalMove('This game cannot skip turns');
     }
     this.module.onPlayerSkipped(this.state, seat);
-    return this.afterMutation();
+    return this.afterMutation([
+      { kind: 'turn', seat, text: 'turn skipped — disconnected', holdMs: 900 },
+    ]);
   }
 
   /**
@@ -152,21 +255,73 @@ export class GameRuntime {
   removePlayer(seat: Seat): ApplyMoveResult {
     this.removedSeats.add(seat);
     this.module.onPlayerRemoved?.(this.state, seat);
-    return this.afterMutation();
+    return this.afterMutation([
+      { kind: 'turn', seat, text: 'left the table', holdMs: 900 },
+    ]);
   }
 
-  private afterMutation(): ApplyMoveResult {
+  private afterMutation(beats: Beat[] = []): ApplyMoveResult {
     this.seq += 1;
     const end = this.module.endIf(this.state);
     if (end) {
       this.status = 'completed';
       this.result = end;
     }
+    const activeSeats = this.activeSeats();
+    // Restart the clock only when the baton actually changed hands, so one
+    // multi-step manual turn (roll → walk → pay) runs on a single allowance.
+    if (!sameSeats(activeSeats, this.clockSeats)) {
+      this.clockSeats = activeSeats;
+      this.turnStartedAt = new Date().toISOString();
+    }
+    this.beats = beats;
+    return {
+      seq: this.seq,
+      status: this.status,
+      activeSeats,
+      result: this.result,
+      beats,
+    };
+  }
+
+  /** What a take-back would unwind, or null when there is nothing to take back. */
+  undoable(): { seat: Seat; type: string; toSeq: number } | null {
+    if (this.status !== 'active' || !this.undoPoint) return null;
+    return {
+      seat: this.undoPoint.seat,
+      type: this.undoPoint.type,
+      toSeq: this.undoPoint.snapshot.seq,
+    };
+  }
+
+  /**
+   * Roll back the last player move. Restores the RNG position too, so a
+   * re-rolled die is genuinely re-rolled rather than replaying the same value
+   * — otherwise a take-back would be a way to peek at the next roll.
+   */
+  undoLastMove(): ApplyMoveResult | null {
+    const point = this.undoPoint;
+    if (!point || this.status !== 'active') return null;
+    this.undoPoint = null;
+    const snap = point.snapshot;
+    this.state = snap.state;
+    this.rng = createSeededRandom(snap.rngState);
+    this.seq = snap.seq;
+    this.status = snap.status;
+    this.result = snap.result;
+    this.removedSeats = new Set(snap.removedSeats);
+    this.turnStartedAt = new Date().toISOString();
+    this.clockSeats = this.activeSeats();
+    const beats: Beat[] = [
+      { kind: 'turn', seat: point.seat, text: 'takes the move back', holdMs: 1600 },
+    ];
+    this.beats = beats;
     return {
       seq: this.seq,
       status: this.status,
       activeSeats: this.activeSeats(),
       result: this.result,
+      beats,
     };
   }
 
@@ -189,6 +344,15 @@ export class GameRuntime {
       activeSeats: this.activeSeats(),
       result: this.result,
       removedSeats: Array.from(this.removedSeats),
+      table: this.table,
+      turnStartedAt: this.turnStartedAt,
+      clockSeats: this.clockSeats,
     };
   }
+}
+
+function sameSeats(a: Seat[], b: Seat[]): boolean {
+  if (a.length !== b.length) return false;
+  const bs = new Set(b);
+  return a.every((s) => bs.has(s));
 }

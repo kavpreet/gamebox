@@ -2,9 +2,11 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { toNodeHandler, fromNodeHeaders } from 'better-auth/node';
 import type { AuthInstance } from './auth.js';
 import { GameService, GameServiceError } from './services/game-service.js';
-import { RoomService } from './services/room-service.js';
+import { RoomService, RoomServiceError } from './services/room-service.js';
+import { AdminService, AdminServiceError } from './services/admin-service.js';
 import { listGames } from './games/registry.js';
-import { config, isGoogleEnabled } from './config.js';
+import { config, isGoogleEnabled, isAdminEmail } from './config.js';
+import type { TableOptions } from '@gamebox/shared-types';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -12,6 +14,7 @@ declare global {
     interface Request {
       userId?: string;
       userName?: string;
+      userEmail?: string;
     }
   }
 }
@@ -29,8 +32,10 @@ export function buildHttpApp(
   auth: AuthInstance,
   games: GameService,
   rooms: RoomService,
+  admin: AdminService,
   onRoomAssigned: (code: string, gameId: string | null) => Promise<void>,
   onGameChanged: (gameId: string) => Promise<void>,
+  onRoomDevicesRevoked: (roomId: string) => Promise<void>,
 ) {
   const app = express();
   app.set('trust proxy', true);
@@ -78,11 +83,41 @@ export function buildHttpApp(
       }
       req.userId = session.user.id;
       req.userName = session.user.name;
+      req.userEmail = session.user.email;
       next();
     } catch (err) {
       next(err);
     }
   };
+
+  /**
+   * Admin membership comes from ADMIN_EMAILS only — never from the DB — so it
+   * cannot be granted through the app. 404 rather than 403: a non-admin should
+   * not learn that an admin surface exists.
+   */
+  const requireAdmin = async (req: Request, res: Response, next: NextFunction) => {
+    await requireUser(req, res, (err?: unknown) => {
+      if (err) {
+        next(err);
+        return;
+      }
+      if (!isAdminEmail(req.userEmail)) {
+        res.status(404).json({ error: 'Not found' });
+        return;
+      }
+      next();
+    });
+  };
+
+  /** Who am I — drives the frontend's admin-only nav and route guard. */
+  app.get('/api/me', requireUser, (req, res) => {
+    res.json({
+      id: req.userId,
+      email: req.userEmail,
+      displayName: req.userName,
+      isAdmin: isAdminEmail(req.userEmail),
+    });
+  });
 
   // ── Game types ─────────────────────────────────────────────────────────
   app.get('/api/game-types', (_req, res) => {
@@ -95,6 +130,7 @@ export function buildHttpApp(
         maxPlayers: m.maxPlayers,
         teams: m.teams ?? 'none',
         options: m.options ?? [],
+        supportsManual: Boolean(m.supportsManual),
       })),
     );
   });
@@ -102,7 +138,11 @@ export function buildHttpApp(
   // ── Lobby ──────────────────────────────────────────────────────────────
   app.post('/api/games', requireUser, async (req, res, next) => {
     try {
-      const summary = await games.createGame(req.userId!, String(req.body.gameType ?? ''));
+      const summary = await games.createGame(
+        req.userId!,
+        String(req.body.gameType ?? ''),
+        (req.body.table ?? {}) as Partial<TableOptions>,
+      );
       res.status(201).json(summary);
     } catch (err) {
       next(err);
@@ -130,6 +170,31 @@ export function buildHttpApp(
   app.get('/api/games/:id', requireUser, async (req, res, next) => {
     try {
       res.json(await games.getSummary(String(req.params.id)));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Table settings — how the game *feels* (manual pieces, turn clock,
+  // animation). Host-only and lobby-only: the runtime freezes its own copy at
+  // start so a mid-game change can't desync the clock.
+  app.get('/api/games/:id/table-options', requireUser, async (req, res, next) => {
+    try {
+      res.json(await games.getTableOptions(String(req.params.id)));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/games/:id/table-options', requireUser, async (req, res, next) => {
+    try {
+      const opts = await games.setTableOptions(
+        String(req.params.id),
+        req.userId!,
+        (req.body ?? {}) as Partial<TableOptions>,
+      );
+      await onGameChanged(String(req.params.id)).catch(() => {});
+      res.json(opts);
     } catch (err) {
       next(err);
     }
@@ -215,6 +280,120 @@ export function buildHttpApp(
     }
   });
 
+  // ── TV pairing (unauthenticated by design — a TV has no user) ──────────
+  /**
+   * Room code + PIN → long-lived device token. Throttled per IP: a 4-digit PIN
+   * is only as good as the number of guesses you get.
+   */
+  const pairAttempts = new Map<string, { n: number; until: number }>();
+  const PAIR_WINDOW_MS = 10 * 60 * 1000;
+  const PAIR_MAX = 10;
+
+  app.post('/api/tv/pair', async (req, res, next) => {
+    try {
+      const key = req.ip ?? 'unknown';
+      const now = Date.now();
+      const entry = pairAttempts.get(key);
+      if (entry && entry.until > now && entry.n >= PAIR_MAX) {
+        res.status(429).json({ error: 'Too many attempts — wait a few minutes.' });
+        return;
+      }
+      const fresh = !entry || entry.until <= now ? { n: 0, until: now + PAIR_WINDOW_MS } : entry;
+      fresh.n += 1;
+      pairAttempts.set(key, fresh);
+
+      const paired = await rooms.pairDevice(String(req.body.room ?? ''), String(req.body.pin ?? ''));
+      pairAttempts.delete(key); // a correct PIN clears the counter
+      res.json(paired);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ── Admin ──────────────────────────────────────────────────────────────
+  app.get('/api/admin/rooms', requireAdmin, async (_req, res, next) => {
+    try {
+      res.json(await rooms.listRoomsForAdmin());
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/admin/rooms', requireAdmin, async (req, res, next) => {
+    try {
+      await rooms.createRoom(String(req.body.name ?? ''), String(req.body.pairingCode ?? ''), String(req.body.pin ?? ''));
+      res.status(201).json(await rooms.listRoomsForAdmin());
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.patch('/api/admin/rooms/:id', requireAdmin, async (req, res, next) => {
+    try {
+      const patch: { name?: string; pin?: string } = {};
+      if (req.body.name !== undefined) patch.name = String(req.body.name);
+      if (req.body.pin !== undefined) patch.pin = String(req.body.pin);
+      await rooms.updateRoom(String(req.params.id), patch);
+      if (patch.pin) await onRoomDevicesRevoked(String(req.params.id));
+      res.json(await rooms.listRoomsForAdmin());
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/admin/rooms/:id/revoke', requireAdmin, async (req, res, next) => {
+    try {
+      await rooms.revokeDevices(String(req.params.id));
+      await onRoomDevicesRevoked(String(req.params.id));
+      res.json(await rooms.listRoomsForAdmin());
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /** Mints a kiosk token for a Pi that can't type a PIN on a remote. */
+  app.post('/api/admin/rooms/:id/token', requireAdmin, async (req, res, next) => {
+    try {
+      res.json({ token: await rooms.mintTokenFor(String(req.params.id)) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.delete('/api/admin/rooms/:id', requireAdmin, async (req, res, next) => {
+    try {
+      await rooms.deleteRoom(String(req.params.id));
+      await onRoomDevicesRevoked(String(req.params.id));
+      res.json(await rooms.listRoomsForAdmin());
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get('/api/admin/users', requireAdmin, async (_req, res, next) => {
+    try {
+      res.json(await admin.listAllowed());
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/admin/users', requireAdmin, async (req, res, next) => {
+    try {
+      res.status(201).json(await admin.addAllowed(String(req.body.email ?? ''), req.userId!));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.delete('/api/admin/users/:email', requireAdmin, async (req, res, next) => {
+    try {
+      res.json(await admin.removeAllowed(decodeURIComponent(String(req.params.email))));
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // ── Static SPA (production: backend serves the built frontend) ────────
   const dist = process.env.FRONTEND_DIST;
   if (dist) {
@@ -227,7 +406,11 @@ export function buildHttpApp(
 
   // ── Errors ─────────────────────────────────────────────────────────────
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    if (err instanceof GameServiceError) {
+    if (
+      err instanceof GameServiceError ||
+      err instanceof RoomServiceError ||
+      err instanceof AdminServiceError
+    ) {
       res.status(codeToStatus[err.code] ?? 400).json({ error: err.message });
       return;
     }

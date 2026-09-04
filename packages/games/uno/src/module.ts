@@ -412,7 +412,7 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
       },
     ],
 
-    setup(seats, rng, options) {
+    setup(seats, rng, options, _table) {
       const deck = rng.shuffle(variant === 'uno' ? buildClassicDeck() : buildFlipDeck(rng));
       const priv: Record<Seat, UnoPrivate | Hidden> = {};
       const handCounts: Record<Seat, number> = {};
@@ -471,7 +471,7 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
     },
 
     moves: {
-      PLAY({ state, seat, payload, rng }) {
+      PLAY({ state, seat, payload, rng, emit }) {
         const s = state as State;
         const pub = s.public;
         const { card: cardIdx, chooseColor, swapWith } = payload as {
@@ -511,6 +511,21 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
         hiddenOf(s).discard.push(card);
         const steps = applyEffect(s, seat, face, chooseColor, swapWith, rng);
         pub.discardTop = faceOf(card, pub.side);
+        emit({
+          kind: 'card',
+          seat,
+          text: `${jumpedIn ? 'jumps in with' : 'plays'} ${describeFace(face)}`,
+          data: { face: describeFace(face) },
+          holdMs: 950,
+        });
+        if (pub.pendingDraw > 0) {
+          emit({
+            kind: 'reveal',
+            seat,
+            text: `+${pub.pendingDraw} and counting!`,
+            holdMs: 1200,
+          });
+        }
         const stacked = pub.pendingDraw > 0 ? ` — +${pub.pendingDraw} and counting!` : '';
         pub.lastEvent = `${jumpedIn ? 'jumped in with' : 'played'} ${describeFace(face)}${
           stacked || (hand.length === 1 ? ' — one card left!' : '')
@@ -577,7 +592,7 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
         stepTurn(pub, 1);
       },
 
-      DECLARE_UNO({ state, seat }) {
+      DECLARE_UNO({ state, seat, emit }) {
         const s = state as State;
         const pub = s.public;
         if (handOf(s, seat).length !== 1) throw new IllegalMove('You can only call UNO on one card');
@@ -585,9 +600,10 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
         pub.unoDeclared.push(seat);
         pub.lastEvent = 'shouted UNO! 🔔';
         pub.lastEventSeat = seat;
+        emit({ kind: 'reveal', seat, text: 'shouts UNO! 🔔', holdMs: 1500 });
       },
 
-      CATCH_UNO({ state, seat, payload, rng }) {
+      CATCH_UNO({ state, seat, payload, rng, emit }) {
         const s = state as State;
         const pub = s.public;
         const { target } = payload as { target: Seat };
@@ -600,6 +616,13 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
         pub.lastEvent = 'CAUGHT_UNO'; // UI formats "X caught Y — +2!"
         pub.lastEventSeat = seat;
         pub.lastEventTarget = target;
+        emit({
+          kind: 'capture',
+          seat,
+          text: `catches a missed UNO — draw ${rulesOf(pub).unoPenalty}!`,
+          data: { target },
+          holdMs: 1900,
+        });
       },
     },
 

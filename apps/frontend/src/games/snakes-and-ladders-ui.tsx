@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { GameSummary } from '@gamebox/shared-types';
-import type { SnlPublic } from '@gamebox/game-snakes-and-ladders';
+import type { SnlPublic, SnlMove } from '@gamebox/game-snakes-and-ladders';
 import { CLASSIC } from '@gamebox/game-snakes-and-ladders';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
+import { useTable } from './table.js';
+import { ClockRing } from './anim.js';
 import {
   seatName, SeatDot, SeatToken, SeatTokens, WinnerBanner, Prompt, Waiting, Die, useBoardFit,
   FxDefs, HandGlyph, CaptureBlast, RebirthPulse, type HandPhase,
@@ -304,8 +306,9 @@ function TvView({ state }: TvViewProps<SnlPublic>) {
 }
 
 /** The board lives on the TV — the phone is just your dice + status. */
-function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<SnlPublic, { kind: 'ROLL' }>) {
+function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<SnlPublic, SnlMove>) {
   const view = state.view;
+  const { clock } = useTable();
   if (!view) return null;
   const myTurn = state.activeSeats.includes(yourSeat) && state.status === 'active';
   const myPos = view.positions[yourSeat] ?? 0;
@@ -319,10 +322,39 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<SnlPublic, 
           <WinnerBanner state={state} />
         ) : myTurn ? (
           <>
-            <Prompt>Your turn!</Prompt>
-            <button className="big" onClick={() => submitMove('ROLL', {})}>
-              🎲 Roll the die
-            </button>
+            <div className="manual-bar">
+              {clock && <ClockRing reading={clock} />}
+              <Prompt>Your turn!</Prompt>
+            </div>
+            {/* Manual mode splits the throw from the walk: the server holds the
+                remaining count, so a step can never travel further than the
+                dice said. */}
+            {view.phase === 'ROLL' && (
+              <button className="big" onClick={() => submitMove('ROLL', {})}>
+                🎲 Roll the die
+              </button>
+            )}
+            {view.phase === 'WALK' && (
+              <>
+                <button className="big" onClick={() => submitMove('STEP', {})}>
+                  👣 Step to {(view.positions[yourSeat] ?? 0) + ((view.pending?.to ?? 0) > (view.positions[yourSeat] ?? 0) ? 1 : -1)}
+                </button>
+                <p className="manual-hint">
+                  {Math.abs((view.pending?.to ?? 0) - (view.positions[yourSeat] ?? 0))} left of your{' '}
+                  {view.pending?.die}
+                </p>
+              </>
+            )}
+            {view.phase === 'SLIDE' && (
+              <>
+                <button className="big" onClick={() => submitMove('TAKE_SLIDE', {})}>
+                  {(view.pending?.slide ?? 0) < (view.pending?.to ?? 0)
+                    ? `🐍 Slide down to ${view.pending?.slide}`
+                    : `🪜 Climb up to ${view.pending?.slide}`}
+                </button>
+                <p className="manual-hint">You landed on {view.pending?.to}.</p>
+              </>
+            )}
           </>
         ) : (
           <Waiting state={state} />

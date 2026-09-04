@@ -672,6 +672,10 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
   const legal = (state.legalMoves ?? []) as MonopolyMove[];
   const kinds = new Set(legal.map((m) => m.kind));
   const myTurnish = state.activeSeats.includes(yourSeat) && state.status === 'active';
+  // Manual mode: while a token is mid-walk or a charge is unpaid, that act is
+  // the only thing this seat may do.
+  const myWalk = myTurnish && view.pendingWalk?.seat === yourSeat ? view.pendingWalk : null;
+  const owed = myTurnish && view.pendingPayment?.seat === yourSeat ? view.pendingPayment : null;
   const here = BOARD[me.position]!;
 
   const myProps = Object.entries(view.properties)
@@ -722,6 +726,28 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
           <WinnerBanner state={state} />
         ) : !myTurnish ? (
           <Waiting state={state} />
+        ) : myWalk ? (
+          <>
+            {/* Manual mode: the throw only committed the distance. The server
+                holds the remaining count, so a step can never travel further
+                than the dice said. */}
+            <button className="big" onClick={() => submitMove('STEP_TOKEN', {})}>
+              👣 Step to {BOARD[(me.position + 1) % BOARD.length]!.name}
+            </button>
+            <p className="manual-hint">
+              {myWalk.remaining} of {myWalk.total} squares left — tap to walk your token.
+            </p>
+          </>
+        ) : owed ? (
+          <>
+            <button className="big pay-button" onClick={() => submitMove('PAY', {})}>
+              💸 Pay ${owed.amount}
+              {owed.to !== null ? ` to ${seatName(state.summary, owed.to)}` : ' to the bank'}
+            </button>
+            <p className="manual-hint">
+              {owed.reason} · you have ${me.cash}, leaving ${me.cash - owed.amount}
+            </p>
+          </>
         ) : view.debt?.seat === yourSeat ? (
           <>
             <Prompt danger>You owe ${view.debt.amount}! Sell or mortgage below, then settle.</Prompt>

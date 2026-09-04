@@ -216,7 +216,7 @@ export const checkers: GameModule<CheckersPublic, CheckersPrivate, CheckersMove>
   },
 
   moves: {
-    MOVE({ state, seat, payload }) {
+    MOVE({ state, seat, payload, emit }) {
       const pub = state.public;
       if (pub.winner !== null) throw new IllegalMove('Game is over');
       if (seat !== pub.turn) throw new IllegalMove('Not your turn');
@@ -230,11 +230,21 @@ export const checkers: GameModule<CheckersPublic, CheckersPrivate, CheckersMove>
       if (move.captured) delete pub.board[move.captured];
       pub.board[to] = piece;
       pub.lastMove = { from, to, captured: move.captured };
+      emit({
+        kind: move.captured ? 'capture' : 'move',
+        seat,
+        text: move.captured ? `jumps ${from} → ${to}, taking a piece` : `${from} → ${to}`,
+        data: { from, to, captured: move.captured ?? null },
+        holdMs: move.captured ? 1100 : 700,
+      });
 
       // promotion (ends any chain)
       const [, r] = parse(to);
       const promoted = !piece.king && ((piece.seat === 0 && r === 7) || (piece.seat === 1 && r === 0));
-      if (promoted) piece.king = true;
+      if (promoted) {
+        piece.king = true;
+        emit({ kind: 'build', seat, text: 'crowns a king!', data: { at: to }, holdMs: 1400 });
+      }
 
       // chain continuation?
       if (move.captured && !promoted) {
