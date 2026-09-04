@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { PandemicPublic, PandemicMove } from '@gamebox/game-pandemic';
 import { CITIES, type Disease } from '@gamebox/game-pandemic';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
+import { TableLog } from './chrome.js';
 import {
   seatName, WinnerBanner, Prompt, Waiting, EventLine, useBoardFit,
   useHandMove, HandGlyph, FxDefs, CaptureBlast, useRecentChange,
@@ -251,6 +252,7 @@ function TvView({ state }: TvViewProps<PandemicPublic>) {
           {view.lastEvent && <div className="tv-player-chip dim small">{view.lastEvent}</div>}
           {view.result === 'lost' && <div className="tv-player-chip" style={{ borderColor: 'var(--danger)' }}>💀 Lost — {view.lossReason}</div>}
           <WinnerBanner state={state} />
+          <TableLog />
         </div>
       </div>
     </div>

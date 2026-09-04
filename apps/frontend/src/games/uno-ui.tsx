@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import type { UnoPublic, UnoMove, Face, UnoColor } from '@gamebox/game-uno';
 import type { Seat } from '@gamebox/shared-types';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
+import { TableLog } from './chrome.js';
 import { seatName, SeatDot, WinnerBanner, Prompt } from './common.js';
 
 /** Player view carries `hand`; Flip also carries every hand's inactive faces. */
@@ -216,6 +217,7 @@ function TvView({ state }: TvViewProps<UnoView>) {
             );
           })}
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );

@@ -21,6 +21,16 @@ export interface QueuedBeat extends Beat {
 export interface BeatPlayer {
   /** The beat on screen right now, or null when the table is quiet. */
   current: QueuedBeat | null;
+  /**
+   * What has just happened, oldest first — a rolling window that outlives the
+   * beat that produced it.
+   *
+   * `current` is a moment; this is the record. A TV across the room needs the
+   * latter: by the time someone looks up, the moment has gone, and a line that
+   * stays put is the difference between following the game and guessing at it.
+   * Kept even when animation is off, because a log is not an animation.
+   */
+  recent: QueuedBeat[];
   /** Beats still waiting behind `current`. */
   pending: number;
   /** True while any narration is playing. */
@@ -28,6 +38,9 @@ export interface BeatPlayer {
   /** Drop everything queued and land on the final state now. */
   skip: () => void;
 }
+
+/** How many past beats the log keeps. Roughly two turns of a dice game. */
+const RECENT_LIMIT = 8;
 
 const DEFAULT_HOLD: Record<string, number> = {
   dice: 1100,
@@ -62,6 +75,7 @@ export function useBeatPlayer(state: LiveState | null, options?: TableOptions): 
 
   const [queue, setQueue] = useState<QueuedBeat[]>([]);
   const [current, setCurrent] = useState<QueuedBeat | null>(null);
+  const [recent, setRecent] = useState<QueuedBeat[]>([]);
   const nextId = useRef(0);
   const seenState = useRef<LiveState | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -72,12 +86,19 @@ export function useBeatPlayer(state: LiveState | null, options?: TableOptions): 
     seenState.current = state;
     const incoming = state.beats ?? [];
     if (incoming.length === 0) return;
+    const tagged = incoming.map((b) => ({ ...b, id: nextId.current++ }));
+
+    // The log records everything the moment it arrives, whatever the animation
+    // setting — turning off the play-out should make the table faster, not
+    // leave it unable to say what just happened.
+    setRecent((r) => [...r, ...tagged].slice(-RECENT_LIMIT));
+
     if (!animate) {
       // Narration off: still fire the sounds so the table stays audible.
       if (wantSound) for (const b of incoming) playBeatSound(b.kind, b.data);
       return;
     }
-    setQueue((q) => [...q, ...incoming.map((b) => ({ ...b, id: nextId.current++ }))]);
+    setQueue((q) => [...q, ...tagged]);
   }, [state, animate, wantSound]);
 
   // ── Playback ──────────────────────────────────────────────────────────────
@@ -108,8 +129,14 @@ export function useBeatPlayer(state: LiveState | null, options?: TableOptions): 
   }, []);
 
   return useMemo(
-    () => ({ current, pending: queue.length, busy: current !== null || queue.length > 0, skip }),
-    [current, queue.length, skip],
+    () => ({
+      current,
+      recent,
+      pending: queue.length,
+      busy: current !== null || queue.length > 0,
+      skip,
+    }),
+    [current, recent, queue.length, skip],
   );
 }
 

@@ -297,7 +297,9 @@ export function TvPage() {
         )}
         {/* Narration and the sound unlock sit above whatever board is showing,
             so a game UI never has to remember to render them. */}
-        <TableChrome showSoundGate />
+        {/* No floating toast on the TV — the sidebar <TableLog> carries the
+            narration, where it stays put long enough to read across a room. */}
+        <TableChrome showSoundGate banner={false} />
       </div>
       </div>
     </TvFitContext.Provider>

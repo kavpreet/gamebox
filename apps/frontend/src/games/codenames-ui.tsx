@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { CodenamesPublic, CodenamesMove, CardKind } from '@gamebox/game-codenames';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
+import { TableLog } from './chrome.js';
 import { seatName, WinnerBanner } from './common.js';
 
 type CodenamesView = CodenamesPublic & { key: CardKind[] | null };
@@ -105,6 +106,7 @@ function TvView({ state }: TvViewProps<CodenamesView>) {
           </div>
         ))}
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );

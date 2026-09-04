@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import type { AzulPublic, AzulMove, PlayerBoard, TileColor } from '@gamebox/game-azul';
 import { wallColor } from '@gamebox/game-azul';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
+import { TableLog } from './chrome.js';
 import { seatName, SeatDot, WinnerBanner, Prompt, Waiting } from './common.js';
 
 const TILE_COLORS = ['#4a7cf7', '#f5d547', '#e94560', '#2b2b35', '#3ec8c0'];
@@ -192,6 +193,7 @@ function TvView({ state }: TvViewProps<AzulPublic>) {
           </div>
         ))}
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );

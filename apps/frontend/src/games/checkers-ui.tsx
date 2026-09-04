@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { CheckersPublic, CheckersMove } from '@gamebox/game-checkers';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
+import { TableStage, TableLog } from './chrome.js';
 import type { GameSummary } from '@gamebox/shared-types';
 import {
   SeatTokens, SeatToken, WinnerBanner, Prompt, Waiting, useBoardFit,
@@ -121,12 +122,15 @@ function TvView({ state }: TvViewProps<CheckersPublic>) {
   return (
     <div className="tv-main">
       <div className="tv-board">
-        <Board view={view} summary={state.summary} />
+        <TableStage sides={2} tilt={44}>
+          <Board view={view} summary={state.summary} />
+        </TableStage>
       </div>
       <div className="tv-sidebar">
         <SeatTokens summary={state.summary} activeSeats={state.activeSeats} />
         {view.chain && <div className="tv-player-chip active">chained capture in progress!</div>}
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );
