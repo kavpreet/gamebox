@@ -585,6 +585,8 @@ input:focus, select:focus {
   display: flex;
   flex-direction: column;
   gap: 1.2vmin;
+  /* Lets the log below shrink instead of pushing the column off screen. */
+  min-height: 0;
 }
 .tv-player-chip {
   position: relative;
@@ -851,9 +853,20 @@ input:focus, select:focus {
   border-radius: 12px;
   background: rgba(10, 13, 30, 0.55);
   border: 1px solid var(--line);
-  /* Never let a long run of beats push the player chips off screen. */
-  max-height: 34vmin;
+  /*
+   * Take whatever room is left under the players and no more. A six-player
+   * game with two-line chips and an auction row leaves very little, and the
+   * log must give way rather than run off the bottom of the screen.
+   *
+   * Because the newest line is first, shrinking drops the oldest lines — the
+   * right thing to lose. The mask fades that cut so it reads as designed
+   * rather than as text clipped by the screen edge.
+   */
+  flex: 0 1 auto;
+  min-height: 0;
   overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
 }
 
 .table-log-line {
