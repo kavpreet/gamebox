@@ -6,6 +6,7 @@ import { RoomService, RoomServiceError } from './services/room-service.js';
 import { AdminService, AdminServiceError } from './services/admin-service.js';
 import { listGames } from './games/registry.js';
 import { config, isGoogleEnabled, isAdminEmail } from './config.js';
+import type { GameOptions } from '@gamebox/shared-types';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -127,6 +128,7 @@ export function buildHttpApp(
         minPlayers: m.minPlayers,
         maxPlayers: m.maxPlayers,
         teams: m.teams ?? 'none',
+        supportsManual: Boolean(m.supportsManual),
       })),
     );
   });
@@ -134,7 +136,11 @@ export function buildHttpApp(
   // ── Lobby ──────────────────────────────────────────────────────────────
   app.post('/api/games', requireUser, async (req, res, next) => {
     try {
-      const summary = await games.createGame(req.userId!, String(req.body.gameType ?? ''));
+      const summary = await games.createGame(
+        req.userId!,
+        String(req.body.gameType ?? ''),
+        (req.body.options ?? {}) as Partial<GameOptions>,
+      );
       res.status(201).json(summary);
     } catch (err) {
       next(err);
@@ -162,6 +168,31 @@ export function buildHttpApp(
   app.get('/api/games/:id', requireUser, async (req, res, next) => {
     try {
       res.json(await games.getSummary(String(req.params.id)));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Table settings — how the game *feels* (manual pieces, turn clock,
+  // animation). Host-only and lobby-only: the runtime freezes its own copy at
+  // start so a mid-game change can't desync the clock.
+  app.get('/api/games/:id/options', requireUser, async (req, res, next) => {
+    try {
+      res.json(await games.getOptions(String(req.params.id)));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/games/:id/options', requireUser, async (req, res, next) => {
+    try {
+      const opts = await games.setOptions(
+        String(req.params.id),
+        req.userId!,
+        (req.body ?? {}) as Partial<GameOptions>,
+      );
+      await onGameChanged(String(req.params.id)).catch(() => {});
+      res.json(opts);
     } catch (err) {
       next(err);
     }

@@ -6,7 +6,8 @@ import {
   type GameModule,
   type RuntimeSnapshot,
 } from '@gamebox/core-engine';
-import type { GameStatus, Seat, GameSummary, SeatAssignment } from '@gamebox/shared-types';
+import type { GameStatus, Seat, GameSummary, SeatAssignment, GameOptions } from '@gamebox/shared-types';
+import { DEFAULT_GAME_OPTIONS, normalizeGameOptions } from '@gamebox/shared-types';
 import type { Database, GamesTable } from '../db/schema.js';
 import { newId, nowIso } from '../db/index.js';
 import { getGame, listGames } from '../games/registry.js';
@@ -82,8 +83,14 @@ export class GameService {
 
   // ── Lobby ─────────────────────────────────────────────────────────────────
 
-  async createGame(userId: string, gameType: string): Promise<GameSummary> {
+  async createGame(
+    userId: string,
+    gameType: string,
+    options?: Partial<GameOptions>,
+  ): Promise<GameSummary> {
     const mod = this.requireModule(gameType);
+    const opts = normalizeGameOptions({ ...DEFAULT_GAME_OPTIONS, ...(options ?? {}) });
+    if (!mod.supportsManual) opts.manual = false;
     const id = newId();
     const pin = await this.allocatePin();
     const now = nowIso();
@@ -103,6 +110,7 @@ export class GameService {
         created_at: now,
         updated_at: now,
         ended_at: null,
+        options: JSON.stringify(opts),
       })
       .execute();
 
@@ -173,7 +181,7 @@ export class GameService {
       .sort((a, b) => a.seat_index - b.seat_index)
       .map((p) => ({ seat: p.seat_index, team: p.team_index ?? undefined }));
 
-    const runtime = GameRuntime.start(mod, seats, newSeed());
+    const runtime = GameRuntime.start(mod, seats, newSeed(), this.optionsOf(game));
     this.runtimes.set(gameId, runtime);
     await this.persist(gameId, runtime, { status: 'active' });
     return runtime;
@@ -189,6 +197,47 @@ export class GameService {
       .set({ status: 'abandoned', join_pin: null, updated_at: nowIso(), ended_at: nowIso() })
       .where('id', '=', gameId)
       .execute();
+  }
+
+  /** Table settings for a game row, tolerant of rows written before options existed. */
+  private optionsOf(game: { options: string | null }): GameOptions {
+    if (!game.options) return { ...DEFAULT_GAME_OPTIONS };
+    try {
+      return normalizeGameOptions(JSON.parse(game.options));
+    } catch {
+      return { ...DEFAULT_GAME_OPTIONS };
+    }
+  }
+
+  /**
+   * Host-only lobby edit of the table settings. Frozen once the game starts —
+   * the runtime snapshot holds its own copy from that point on.
+   */
+  async setOptions(
+    gameId: string,
+    userId: string,
+    options: Partial<GameOptions>,
+  ): Promise<GameOptions> {
+    const game = await this.requireGame(gameId);
+    if (game.created_by !== userId) {
+      throw new GameServiceError('Only the host can change table settings', 'FORBIDDEN');
+    }
+    if (game.status !== 'lobby') {
+      throw new GameServiceError('Game already started', 'CONFLICT');
+    }
+    const mod = this.requireModule(game.game_type);
+    const merged = normalizeGameOptions({ ...this.optionsOf(game), ...options });
+    if (!mod.supportsManual) merged.manual = false;
+    await this.db
+      .updateTable('games')
+      .set({ options: JSON.stringify(merged), updated_at: nowIso() })
+      .where('id', '=', gameId)
+      .execute();
+    return merged;
+  }
+
+  async getOptions(gameId: string): Promise<GameOptions> {
+    return this.optionsOf(await this.requireGame(gameId));
   }
 
   // ── Runtime access / rehydration ──────────────────────────────────────────
@@ -256,6 +305,31 @@ export class GameService {
     const result = runtime.skipSeat(seat);
     await this.recordMove(gameId, result.seq, null, 'SYSTEM_SKIP', { seat });
     await this.persist(gameId, runtime, { status: result.status, finalResult: result.result });
+    return runtime;
+  }
+
+  /**
+   * Unwind the last player move after the table agreed to it. The rolled-back
+   * move is deleted from the log so `version` and the highest recorded seq
+   * stay consistent — otherwise the next move would collide with the row the
+   * undone one already wrote.
+   */
+  async undoLastMove(gameId: string): Promise<GameRuntime | null> {
+    const runtime = await this.getRuntime(gameId);
+    if (!runtime) throw new GameServiceError('Game is not active', 'CONFLICT');
+    const undone = runtime.undoable();
+    const result = runtime.undoLastMove();
+    if (!result || !undone) throw new GameServiceError('There is nothing to take back', 'CONFLICT');
+    await this.db
+      .deleteFrom('moves')
+      .where('game_id', '=', gameId)
+      .where('seq', '>', result.seq)
+      .execute();
+    await this.persist(gameId, runtime, {
+      status: result.status,
+      finalResult: result.result,
+      skipVersionCheck: true,
+    });
     return runtime;
   }
 

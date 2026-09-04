@@ -8,12 +8,23 @@ import { getSocket, emitAck } from '../socket.js';
 import { getGameUi } from '../games/registry.js';
 import type { LiveState } from '../games/types.js';
 import { seatName } from '../games/common.js';
+import { TableProvider } from '../games/table.js';
+import { TableChrome } from '../games/chrome.js';
+import { TableSettings } from '../games/table-settings.js';
 
 interface VoteUpdate {
   gameId: string;
   targetSeat: Seat;
   options: DisconnectOption[];
   votes: Record<number, DisconnectOption>;
+}
+
+interface TakebackUpdate {
+  gameId: string;
+  requestedBy: Seat;
+  moveType: string | null;
+  voters: Seat[];
+  ballots: Record<number, boolean>;
 }
 
 export function GamePage() {
@@ -26,6 +37,8 @@ export function GamePage() {
   const [moveError, setMoveError] = useState('');
   const [vote, setVote] = useState<VoteUpdate | null>(null);
   const [voteEligible, setVoteEligible] = useState<{ seat: Seat; options: DisconnectOption[] } | null>(null);
+  const [takeback, setTakeback] = useState<TakebackUpdate | null>(null);
+  const [takebackNote, setTakebackNote] = useState('');
   const moveErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -53,6 +66,15 @@ export function GamePage() {
         setVoteEligible(null);
       }
     };
+    const onTakeback = (t: TakebackUpdate) => {
+      if (t.gameId === gameId) setTakeback(t);
+    };
+    const onTakebackResolved = (r: { gameId: string; approved: boolean }) => {
+      if (r.gameId !== gameId) return;
+      setTakeback(null);
+      setTakebackNote(r.approved ? 'Take-back agreed — the move was undone.' : 'The table said no.');
+      setTimeout(() => setTakebackNote(''), 4000);
+    };
     const onVoteUpdate = (v: VoteUpdate) => v.gameId === gameId && setVote(v);
     const onVoteResolved = () => setVote(null);
     const onVoteEligible = (v: { gameId: string; seat: Seat; options: DisconnectOption[] }) =>
@@ -62,6 +84,8 @@ export function GamePage() {
     socket.on('vote:update', onVoteUpdate);
     socket.on('vote:resolved', onVoteResolved);
     socket.on('vote:eligible', onVoteEligible);
+    socket.on('takeback:update', onTakeback);
+    socket.on('takeback:resolved', onTakebackResolved);
     socket.on('connect', join);
     join();
 
@@ -70,6 +94,8 @@ export function GamePage() {
       socket.off('vote:update', onVoteUpdate);
       socket.off('vote:resolved', onVoteResolved);
       socket.off('vote:eligible', onVoteEligible);
+      socket.off('takeback:update', onTakeback);
+      socket.off('takeback:resolved', onTakebackResolved);
       socket.off('connect', join);
     };
   }, [gameId, session, isPending, navigate]);
@@ -123,7 +149,8 @@ export function GamePage() {
 
   const ui = getGameUi(state.summary.gameType);
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+    <TableProvider state={state} yourSeat={yourSeat}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
       {state.status === 'paused' && (
         <div className="card center" style={{ margin: '1rem' }}>
           <h3>Game paused</h3>
@@ -131,10 +158,72 @@ export function GamePage() {
         </div>
       )}
       {moveError && <p className="error center">{moveError}</p>}
+      {takebackNote && <p className="dim center">{takebackNote}</p>}
+
+      {/* A misclick is permanent in a way a mis-placed counter never is; this
+          is the table's own remedy for it, with the same social safeguard. */}
+      {state.status === 'active' && !takeback && (
+        <div className="center" style={{ padding: '0 1rem' }}>
+          <button
+            className="ghost"
+            style={{ width: 'auto' }}
+            onClick={async () => {
+              const res = await emitAck<{ ok: boolean; error?: string; applied?: boolean }>(
+                'takeback:call',
+                { gameId },
+              );
+              if (!res.ok) {
+                setTakebackNote(res.error ?? 'Cannot take that back');
+                setTimeout(() => setTakebackNote(''), 4000);
+              } else if (!res.applied) {
+                setTakebackNote('Asked the table…');
+              }
+            }}
+          >
+            ↩ Take back my last move
+          </button>
+        </div>
+      )}
       {ui ? (
         <ui.PlayerView state={state} yourSeat={yourSeat} submitMove={submitMove} />
       ) : (
         <p className="error center">No UI registered for {state.summary.gameType}</p>
+      )}
+
+      {takeback && takeback.requestedBy !== yourSeat && takeback.voters.includes(yourSeat) && (
+        <div className="overlay">
+          <div className="card">
+            <h3>
+              {seatName(state.summary, takeback.requestedBy)} wants to take back their last move
+              {takeback.moveType ? ` (${takeback.moveType.toLowerCase().replace(/_/g, ' ')})` : ''}
+            </h3>
+            <p className="dim">Everyone else has to agree — one “no” is enough.</p>
+            <div className="row">
+              <button onClick={() => emitAck('takeback:vote', { gameId, approve: true })}>Allow it</button>
+              <button
+                className="secondary"
+                onClick={() => emitAck('takeback:vote', { gameId, approve: false })}
+              >
+                No, it stands
+              </button>
+            </div>
+            <p className="dim small">
+              {Object.values(takeback.ballots).filter(Boolean).length} of {takeback.voters.length} agreed
+            </p>
+          </div>
+        </div>
+      )}
+
+      {takeback && takeback.requestedBy === yourSeat && (
+        <div className="overlay">
+          <div className="card center">
+            <h3>Asking the table…</h3>
+            <p className="dim">
+              {Object.values(takeback.ballots).filter(Boolean).length} of {takeback.voters.length} have agreed
+              so far.
+            </p>
+          </div>
+        </div>
       )}
 
       {voteEligible && !vote && (
@@ -171,7 +260,10 @@ export function GamePage() {
           </div>
         </div>
       )}
+
+      <TableChrome />
     </div>
+    </TableProvider>
   );
 }
 
@@ -254,6 +346,8 @@ function Lobby({ state, isHost }: { state: LiveState; isHost: boolean }) {
           </div>
         ))}
       </div>
+
+      <TableSettings gameId={gameId} typeInfo={typeInfo} isHost={isHost} />
 
       {rooms.length > 0 && (
         <div className="card">

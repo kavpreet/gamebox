@@ -123,6 +123,8 @@ function TvView({ state }: TvViewProps<UnoView>) {
               <span className={`token seat-color-${p.seat % 6}`} />
               <span className="grow">{p.displayName}</span>
               <strong>{view.handCounts[p.seat] ?? 0}</strong>
+              {view.unoCalled.includes(p.seat) && <span className="badge on">UNO!</span>}
+              {view.unoPending === p.seat && <span className="badge">didn't call…</span>}
               {!p.connected && <span className="dc">⚠</span>}
             </div>
           ))}
@@ -135,18 +137,27 @@ function TvView({ state }: TvViewProps<UnoView>) {
 function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<UnoView, UnoMove>) {
   const view = state.view;
   const [wildIdx, setWildIdx] = useState<number | null>(null);
+  const [unoArmed, setUnoArmed] = useState(false);
   if (!view) return null;
   const myTurn = state.activeSeats.includes(yourSeat) && state.status === 'active';
   const legal = (state.legalMoves ?? []) as UnoMove[];
   const playableIdx = new Set(legal.filter((m) => m.kind === 'PLAY').map((m) => (m as { card: number }).card));
   const canDraw = legal.some((m) => m.kind === 'DRAW');
   const canPass = legal.some((m) => m.kind === 'PASS');
+  const canCatch = legal.some((m) => m.kind === 'CATCH_UNO');
+
+  // Declaring UNO has to be a deliberate act or it is not a ritual — so it is
+  // armed before the play, exactly like saying it out loud as you put the card
+  // down. Going down to one card without it leaves you open to a catch.
+  const goingToOne = (view.hand?.length ?? 0) === 2;
 
   const play = (idx: number, face: Face) => {
+    const callUno = goingToOne && unoArmed;
     if (face.color === 'W') {
       setWildIdx(idx);
     } else {
-      submitMove('PLAY', { card: idx });
+      submitMove('PLAY', { card: idx, callUno });
+      setUnoArmed(false);
     }
   };
 
@@ -173,6 +184,25 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<UnoView, Un
           <p className="dim">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</p>
         )}
         {view.lastEvent && <p className="dim small">{view.lastEvent}</p>}
+
+        {myTurn && canCatch && view.unoPending !== null && (
+          <button
+            style={{ background: 'var(--danger)' }}
+            onClick={() => submitMove('CATCH_UNO', {})}
+          >
+            ☝ {seatName(state.summary, view.unoPending)} didn't say UNO — make them draw 2
+          </button>
+        )}
+
+        {myTurn && goingToOne && (
+          <button
+            className={unoArmed ? '' : 'secondary'}
+            onClick={() => setUnoArmed(!unoArmed)}
+            style={unoArmed ? { background: 'var(--gold)', color: '#1b2038', fontWeight: 900 } : undefined}
+          >
+            {unoArmed ? '🗣 UNO! (armed — play your card)' : 'Say “UNO!” with your next card'}
+          </button>
+        )}
       </div>
 
       {view.hand && (
@@ -212,8 +242,9 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<UnoView, Un
                   key={c}
                   style={{ background: COLOR_HEX[c], flex: 1 }}
                   onClick={() => {
-                    submitMove('PLAY', { card: wildIdx, chooseColor: c });
+                    submitMove('PLAY', { card: wildIdx, chooseColor: c, callUno: goingToOne && unoArmed });
                     setWildIdx(null);
+                    setUnoArmed(false);
                   }}
                 >
                   {COLOR_NAME[c]}

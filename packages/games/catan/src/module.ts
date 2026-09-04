@@ -1,4 +1,4 @@
-import type { GameModule, GameState, Seat, SeededRandom } from '@gamebox/core-engine';
+import type { GameModule, GameState, Seat, SeededRandom, EmitBeat } from '@gamebox/core-engine';
 import { IllegalMove } from '@gamebox/core-engine';
 import {
   generateBoard, cornersOf, hexesOfVertex, vertexNeighbors, edgeId, edgeVertices,
@@ -256,17 +256,45 @@ function settlementConnected(pub: CatanPublic, seat: Seat, v: VertexId): boolean
   return vertexNeighbors(v).some((n) => pub.roads[edgeId(v, n)] === seat);
 }
 
-function distribute(s: State, roll: number): void {
+/**
+ * Pay out every hex that matches the roll.
+ *
+ * The per-seat tally is emitted rather than just applied: a silent bump to a
+ * resource counter is exactly the kind of change nobody at the table notices,
+ * and on a real board each player physically takes their own cards.
+ */
+function distribute(s: State, roll: number, emit?: EmitBeat): void {
   const pub = s.public;
+  const tally = new Map<Seat, Partial<Record<Resource, number>>>();
   for (const hex of pub.hexes) {
     if (hex.token !== roll || hex.tile === 'desert') continue;
     if (hexKey(hex.q, hex.r) === pub.robber) continue;
     for (const v of cornersOf(hex.q, hex.r)) {
       const b = pub.buildings[v];
-      if (b) gain(s, b.owner, hex.tile as Resource, b.city ? 2 : 1);
+      if (!b) continue;
+      const n = b.city ? 2 : 1;
+      gain(s, b.owner, hex.tile as Resource, n);
+      const got = tally.get(b.owner) ?? {};
+      got[hex.tile as Resource] = (got[hex.tile as Resource] ?? 0) + n;
+      tally.set(b.owner, got);
     }
   }
   refreshCounts(s);
+  if (!emit) return;
+  if (tally.size === 0) {
+    emit({ kind: 'say', seat: null, text: `nobody produces on ${roll}`, holdMs: 1100 });
+    return;
+  }
+  for (const [owner, got] of tally) {
+    const parts = Object.entries(got).map(([r, n]) => `${n}× ${r}`);
+    emit({
+      kind: 'money',
+      seat: owner,
+      text: `collects ${parts.join(', ')}`,
+      data: { amount: 1, resources: got },
+      holdMs: 1100,
+    });
+  }
 }
 
 function stealRandom(s: State, thief: Seat, victim: Seat, rng: SeededRandom): void {
@@ -437,7 +465,7 @@ export const catan: GameModule<CatanPublic, CatanPrivate | Hidden, CatanMove> = 
       refreshScores(s);
     },
 
-    ROLL({ state, seat, rng }) {
+    ROLL({ state, seat, rng, emit }) {
       const s = state as State;
       const pub = s.public;
       if (pub.phase !== 'ROLL' || seat !== currentSeat(pub)) throw new IllegalMove('Not your roll');
@@ -445,6 +473,13 @@ export const catan: GameModule<CatanPublic, CatanPrivate | Hidden, CatanMove> = 
       const d2 = rng.int(1, 6);
       pub.lastRoll = { d1, d2 };
       const roll = d1 + d2;
+      emit({
+        kind: 'dice',
+        seat,
+        text: `rolls ${d1} + ${d2} = ${roll}`,
+        data: { dice: [d1, d2] },
+        holdMs: 1400,
+      });
       if (roll === 7) {
         pub.discardsPending = {};
         for (const st of pub.order) {
@@ -453,8 +488,9 @@ export const catan: GameModule<CatanPublic, CatanPrivate | Hidden, CatanMove> = 
         }
         pub.phase = Object.keys(pub.discardsPending).length > 0 ? 'DISCARD' : 'ROBBER';
         pub.lastEvent = 'rolled a 7!';
+        emit({ kind: 'jail', seat, text: 'rolled a 7 — the robber moves', holdMs: 1600 });
       } else {
-        distribute(s, roll);
+        distribute(s, roll, emit);
         pub.phase = 'MAIN';
         pub.lastEvent = `rolled ${roll}`;
       }

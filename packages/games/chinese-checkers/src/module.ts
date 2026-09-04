@@ -166,7 +166,7 @@ export const chineseCheckers: GameModule<CCPublic, CCPrivate, CCMove> = {
   },
 
   moves: {
-    MOVE({ state, seat, payload }) {
+    MOVE({ state, seat, payload, emit }) {
       const pub = state.public;
       if (seat !== currentSeat(pub)) throw new IllegalMove('Not your turn');
       const { from, to } = payload as { from: Cell; to: Cell };
@@ -176,12 +176,15 @@ export const chineseCheckers: GameModule<CCPublic, CCPrivate, CCMove> = {
       delete pub.pegs[from];
       pub.pegs[to] = seat;
       pub.lastMove = { seat, from, to };
+      emit({ kind: 'move', seat, text: `${from} → ${to}`, data: { from, to }, holdMs: 700 });
 
       if (hasWon(pub, seat)) {
         pub.winner = seat;
+        emit({ kind: 'reveal', seat, text: 'fills the far triangle — wins!', holdMs: 2400 });
         return;
       }
       pub.turnIndex = (pub.turnIndex + 1) % pub.order.length;
+      emit({ kind: 'turn', seat: currentSeat(pub), text: 'to move', holdMs: 600 });
     },
   },
 

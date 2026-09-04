@@ -1,8 +1,11 @@
-import React from 'react';
-import type { SnlPublic } from '@gamebox/game-snakes-and-ladders';
+import React, { useMemo } from 'react';
+import type { SnlPublic, SnlMove } from '@gamebox/game-snakes-and-ladders';
 import { SNAKES, LADDERS } from '@gamebox/game-snakes-and-ladders';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
 import { seatName, SeatTokens, WinnerBanner } from './common.js';
+import { useTable } from './table.js';
+import { activeBeat } from './beats.js';
+import { BoardStage, ClockRing, DiceStage, countPath, povSpin, useWalk } from './anim.js';
 
 const CELL = 60;
 const PAD = 8;
@@ -20,7 +23,29 @@ function squareXY(square: number): { x: number; y: number } {
 
 const SEAT_COLORS = ['#e94560', '#2ec4b6', '#f5a623', '#7c5cff', '#3fa7ff', '#9ad14b'];
 
-function Board({ view, size = '100%' }: { view: SnlPublic; size?: string }) {
+/**
+ * Square 0 is "off the board". Give it a coordinate just below the grid so a
+ * counter entering play slides on from the edge instead of materialising.
+ */
+function tokenXY(square: number, laneIndex: number): { x: number; y: number } {
+  if (square <= 0) return { x: PAD + 22 + laneIndex * 30, y: PAD + CELL * 10 + 22 };
+  return squareXY(square);
+}
+
+function Board({
+  view,
+  shown,
+  walking,
+  highlightSquare,
+  onSquareTap,
+}: {
+  view: SnlPublic;
+  shown: Record<number, number>;
+  walking: number | null;
+  /** Square the current player may tap to step onto (manual mode). */
+  highlightSquare?: number | null;
+  onSquareTap?: (square: number) => void;
+}) {
   const W = PAD * 2 + CELL * 10;
   const cells = [];
   for (let sq = 1; sq <= 100; sq++) {
@@ -72,66 +97,128 @@ function Board({ view, size = '100%' }: { view: SnlPublic; size?: string }) {
     );
   }
 
-  // Tokens, fanned out when sharing a square
+  // Counters are drawn at their *shown* square, which trails the authoritative
+  // one while a walk plays out — that lag is the whole point.
   const bySquare = new Map<number, number[]>();
-  for (const [seatStr, pos] of Object.entries(view.positions)) {
-    if (pos === 0) continue;
+  for (const [seatStr, pos] of Object.entries(shown)) {
     const arr = bySquare.get(pos) ?? [];
     arr.push(Number(seatStr));
     bySquare.set(pos, arr);
   }
+
   const tokens: React.ReactElement[] = [];
   for (const [sq, seats] of bySquare) {
-    const { x, y } = squareXY(sq);
     seats.forEach((seat, i) => {
-      const offset = (i - (seats.length - 1) / 2) * 16;
+      const { x, y } = tokenXY(sq, i);
+      const offset = sq > 0 ? (i - (seats.length - 1) / 2) * 16 : 0;
+      const isWalking = walking === seat;
       tokens.push(
-        <circle
-          key={`t${seat}`}
-          cx={x + offset}
-          cy={y + 8}
-          r={11}
-          fill={SEAT_COLORS[seat % SEAT_COLORS.length]}
-          stroke="#0f1220"
-          strokeWidth={2.5}
-        />,
+        <g key={`t${seat}`}>
+          <ellipse
+            className="token-shadow"
+            cx={x + offset + 2}
+            cy={y + 15}
+            rx={10}
+            ry={3.5}
+            fill="#05060f"
+          />
+          <circle
+            className={`walk-token ${isWalking ? 'hopping' : ''}`}
+            cx={x + offset}
+            cy={y + (isWalking ? 2 : 8)}
+            r={11}
+            fill={SEAT_COLORS[seat % SEAT_COLORS.length]}
+            stroke="#0f1220"
+            strokeWidth={2.5}
+          />
+        </g>,
       );
     });
   }
 
-  // Start area tokens (position 0)
-  const waiting = Object.entries(view.positions).filter(([, p]) => p === 0);
+  const hl = highlightSquare && highlightSquare >= 1 && highlightSquare <= 100 ? squareXY(highlightSquare) : null;
 
   return (
-    <svg viewBox={`0 0 ${W} ${W + (waiting.length ? 34 : 0)}`} style={{ maxWidth: size, maxHeight: '100%', width: '100%' }}>
+    <svg viewBox={`0 0 ${W} ${W + 40}`} style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
       {cells}
       {links}
-      {tokens}
-      {waiting.map(([seatStr], i) => (
-        <circle
-          key={`w${seatStr}`}
-          cx={PAD + 14 + i * 30}
-          cy={W + 14}
-          r={11}
-          fill={SEAT_COLORS[Number(seatStr) % SEAT_COLORS.length]}
-          stroke="#0f1220"
-          strokeWidth={2.5}
+      {hl && (
+        <rect
+          className="manual-target"
+          x={hl.x - CELL / 2}
+          y={hl.y - CELL / 2}
+          width={CELL}
+          height={CELL}
+          fill="#9ad14b"
+          stroke="#d6ffa8"
+          strokeWidth={3}
+          onClick={() => onSquareTap?.(highlightSquare!)}
         />
-      ))}
+      )}
+      {tokens}
     </svg>
   );
 }
 
+/** Shared board + walk animation, so TV and phone stay in step. */
+function useSnlBoard(view: SnlPublic) {
+  const { options, beats } = useTable();
+  const targets = useMemo(() => {
+    const out: Record<number, number> = {};
+    for (const [seatStr, pos] of Object.entries(view.positions)) out[Number(seatStr)] = pos;
+    return out;
+  }, [view.positions]);
+
+  const walk = useWalk(targets, countPath, {
+    stepMs: 200,
+    enabled: options.animate,
+    sound: options.sound,
+  });
+
+  const dice = activeBeat(beats, 'dice');
+  const rollingDice = (dice?.data?.dice as number[] | undefined) ?? null;
+  return { walk, rollingDice, options };
+}
+
 function TvView({ state }: TvViewProps<SnlPublic>) {
   const view = state.view;
+  const { povSeat, clock } = useTable();
+  const board = useSnlBoard(view ?? ({ positions: {} } as SnlPublic));
   if (!view) return null;
+
+  // The board leans back a little more while the dice are in the air, which
+  // reads as the camera lifting to take in the whole table.
+  const rolling = board.rollingDice !== null;
   return (
     <div className="tv-main">
-      <div className="tv-board">
-        <Board view={view} />
+      <div className="tv-board" style={{ position: 'relative' }}>
+        <BoardStage
+          enabled={board.options.perspective}
+          tilt={rolling ? 34 : 48}
+          spin={povSpin(povSeat, 2)}
+          zoom={rolling ? 0.9 : 1}
+        >
+          <Board view={view} shown={board.walk.shown} walking={board.walk.walking} />
+        </BoardStage>
+        {board.rollingDice && <DiceStage dice={board.rollingDice} />}
       </div>
       <div className="tv-sidebar">
         <SeatTokens summary={state.summary} activeSeats={state.activeSeats} />
+        {clock && (
+          <div className="tv-player-chip">
+            <ClockRing reading={clock} />
+            <span className="grow">
+              {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')} to play
+            </span>
+          </div>
+        )}
+        {view.manual && view.phase !== 'ROLL' && (
+          <div className="tv-player-chip">
+            {view.phase === 'WALK'
+              ? `walking ${(view.pending?.to ?? 0) - (view.positions[state.activeSeats[0] ?? 0] ?? 0)} more…`
+              : 'take the snake / ladder'}
+          </div>
+        )}
         {view.lastRoll && (
           <div className="tv-player-chip">
             🎲 {seatName(state.summary, view.lastRoll.seat)} rolled a {view.lastRoll.die}
@@ -144,10 +231,20 @@ function TvView({ state }: TvViewProps<SnlPublic>) {
   );
 }
 
-function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<SnlPublic, { kind: 'ROLL' }>) {
+function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<SnlPublic, SnlMove>) {
   const view = state.view;
+  const { clock, options } = useTable();
+  const board = useSnlBoard(view ?? ({ positions: {} } as SnlPublic));
   if (!view) return null;
+
   const myTurn = state.activeSeats.includes(yourSeat) && state.status === 'active';
+  const here = view.positions[yourSeat] ?? 0;
+  const stepsLeft = view.pending ? view.pending.to - here : 0;
+  // In manual mode the next square is the only legal target, so the board can
+  // highlight it and accept the tap directly.
+  const nextSquare = myTurn && view.phase === 'WALK' ? here + 1 : null;
+  const slideSquare = myTurn && view.phase === 'SLIDE' ? view.pending?.slide ?? null : null;
+
   return (
     <div className="page">
       <div className="card center">
@@ -155,26 +252,59 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<SnlPublic, 
           <WinnerBanner state={state} />
         ) : myTurn ? (
           <>
-            <h2>Your turn!</h2>
-            <button className="big" onClick={() => submitMove('ROLL', {})}>
-              🎲 Roll the die
-            </button>
+            <div className="manual-bar">
+              {clock && <ClockRing reading={clock} />}
+              <h2 style={{ margin: 0 }}>Your turn</h2>
+            </div>
+            {view.phase === 'ROLL' && (
+              <button className="big" onClick={() => submitMove('ROLL', {})}>
+                🎲 Throw the die
+              </button>
+            )}
+            {view.phase === 'WALK' && (
+              <>
+                <button className="big" onClick={() => submitMove('STEP', {})}>
+                  👣 Step to {here + 1}
+                </button>
+                <p className="manual-hint">
+                  {stepsLeft} {stepsLeft === 1 ? 'square' : 'squares'} left of your {view.pending?.die}
+                </p>
+              </>
+            )}
+            {view.phase === 'SLIDE' && (
+              <>
+                <button className="big" onClick={() => submitMove('TAKE_SLIDE', {})}>
+                  {(view.pending?.slide ?? 0) < (view.pending?.to ?? 0)
+                    ? `🐍 Slide down to ${view.pending?.slide}`
+                    : `🪜 Climb up to ${view.pending?.slide}`}
+                </button>
+                <p className="manual-hint">You landed on {view.pending?.to}.</p>
+              </>
+            )}
           </>
         ) : (
           <h3 className="dim">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</h3>
         )}
-        {view.lastRoll && (
-          <p className="dim">
-            {seatName(state.summary, view.lastRoll.seat)} rolled a {view.lastRoll.die}
-            {view.lastRoll.slide !== null && (view.lastRoll.slide < view.lastRoll.to ? ' 🐍' : ' 🪜')}
-          </p>
-        )}
         <p>
-          You are on square <strong>{view.positions[yourSeat] ?? 0}</strong>
+          You are on square <strong>{here}</strong>
         </p>
       </div>
-      <div className="card">
-        <Board view={view} />
+      <div className="card" style={{ position: 'relative' }}>
+        <BoardStage
+          enabled={options.perspective}
+          tilt={38}
+          spin={0}
+          zoom={1}
+        >
+          <Board
+            view={view}
+            shown={board.walk.shown}
+            walking={board.walk.walking}
+            highlightSquare={nextSquare ?? slideSquare}
+            onSquareTap={() => submitMove(view.phase === 'WALK' ? 'STEP' : 'TAKE_SLIDE', {})}
+          />
+        </BoardStage>
+        {board.rollingDice && <DiceStage dice={board.rollingDice} />}
       </div>
     </div>
   );

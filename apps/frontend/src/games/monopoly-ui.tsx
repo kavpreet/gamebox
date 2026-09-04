@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { MonopolyPublic, MonopolyMove } from '@gamebox/game-monopoly';
 import { BOARD, rentFor } from '@gamebox/game-monopoly';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
 import { seatName, WinnerBanner } from './common.js';
+import { useTable } from './table.js';
+import { activeBeat } from './beats.js';
+import { BoardStage, ClockRing, DiceStage, povSpin, useRingPath, useWalk } from './anim.js';
 
 const SEAT_COLORS = ['#e94560', '#2ec4b6', '#f5a623', '#7c5cff', '#3fa7ff', '#9ad14b'];
 const GROUP_HEX: Record<string, string> = {
@@ -18,7 +21,23 @@ function cellOf(pos: number): [number, number] {
   return [10, pos - 30];
 }
 
-function Board({ view, nameOf }: { view: MonopolyPublic; nameOf: (seat: number) => string }) {
+function Board({
+  view,
+  nameOf,
+  shown,
+  walking,
+  targetSquare,
+  onTargetTap,
+}: {
+  view: MonopolyPublic;
+  nameOf: (seat: number) => string;
+  /** Positions to draw — trails the authoritative ones while a token walks. */
+  shown: Record<number, number>;
+  walking: number | null;
+  /** Manual mode: the next square this player may step onto. */
+  targetSquare?: number | null;
+  onTargetTap?: () => void;
+}) {
   const C = 62;
   const cells: React.ReactElement[] = [];
   BOARD.forEach((sp, pos) => {
@@ -47,28 +66,56 @@ function Board({ view, nameOf }: { view: MonopolyPublic; nameOf: (seat: number) 
     );
   });
 
-  // tokens
+  // Tokens are drawn at their *shown* square, which lags the real one while a
+  // walk plays out — that lag is exactly what makes the move legible.
   const bySpace = new Map<number, number[]>();
   for (const s of view.order) {
     const p = view.players[s]!;
     if (p.bankrupt) continue;
-    (bySpace.get(p.position) ?? bySpace.set(p.position, []).get(p.position)!).push(s);
+    const pos = shown[s] ?? p.position;
+    (bySpace.get(pos) ?? bySpace.set(pos, []).get(pos)!).push(s);
   }
   const tokens: React.ReactElement[] = [];
   for (const [pos, seats] of bySpace) {
     const [cx, cy] = cellOf(pos);
     seats.forEach((s, i) => {
+      const isWalking = walking === s;
       tokens.push(
-        <circle key={s} cx={cx * C + 14 + i * 12} cy={cy * C + 36} r={7}
-          fill={SEAT_COLORS[s % 6]} stroke="#0f1220" strokeWidth={2} />,
+        <g key={s}>
+          <ellipse className="token-shadow" cx={cx * C + 15 + i * 12} cy={cy * C + 42} rx={6.5} ry={2.5} fill="#05060f" />
+          <circle
+            className={`walk-token ${isWalking ? 'hopping' : ''}`}
+            cx={cx * C + 14 + i * 12}
+            cy={cy * C + (isWalking ? 30 : 36)}
+            r={7}
+            fill={SEAT_COLORS[s % 6]}
+            stroke="#0f1220"
+            strokeWidth={2}
+          />
+        </g>,
       );
     });
   }
+
+  const target = targetSquare !== null && targetSquare !== undefined ? cellOf(targetSquare) : null;
 
   return (
     <svg viewBox={`0 0 ${11 * C} ${11 * C}`} style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
       <rect width={11 * C} height={11 * C} fill="#141830" />
       {cells}
+      {target && (
+        <rect
+          className="manual-target"
+          x={target[0] * C}
+          y={target[1] * C}
+          width={C}
+          height={C}
+          fill="#9ad14b"
+          stroke="#d6ffa8"
+          strokeWidth={3}
+          onClick={onTargetTap}
+        />
+      )}
       {tokens}
       {/* center info */}
       <text x={5.5 * C} y={4.6 * C} textAnchor="middle" fontSize={30} fontWeight={900} fill="#39406e">MONOPOLY</text>
@@ -97,15 +144,79 @@ function Board({ view, nameOf }: { view: MonopolyPublic; nameOf: (seat: number) 
   );
 }
 
+/**
+ * Walk animation + dice, shared by the TV and the phone so both screens tell
+ * the same story at the same pace.
+ */
+function useMonopolyBoard(view: MonopolyPublic | null) {
+  const { options, beats } = useTable();
+  const path = useRingPath(BOARD.length);
+  const targets = useMemo(() => {
+    const out: Record<number, number> = {};
+    if (!view) return out;
+    for (const s of view.order) {
+      if (view.players[s]!.bankrupt) continue;
+      out[s] = view.players[s]!.position;
+    }
+    return out;
+  }, [view]);
+
+  const walk = useWalk(targets, path, {
+    stepMs: 190,
+    enabled: options.animate,
+    sound: options.sound,
+  });
+  const diceBeat = activeBeat(beats, 'dice');
+  const dice = (diceBeat?.data?.dice as number[] | undefined) ?? null;
+  return { walk, dice, options };
+}
+
 function TvView({ state }: TvViewProps<MonopolyPublic>) {
   const view = state.view;
+  const { povSeat, clock } = useTable();
+  const board = useMonopolyBoard(view);
   if (!view) return null;
+
+  // The camera pulls back and levels off while the dice are in the air, then
+  // settles back down over the board — the roll gets its own moment instead of
+  // being a number that quietly changed.
+  const rolling = board.dice !== null;
   return (
     <div className="tv-main">
-      <div className="tv-board">
-        <Board view={view} nameOf={(s) => seatName(state.summary, s)} />
+      <div className="tv-board" style={{ position: 'relative' }}>
+        <BoardStage
+          enabled={board.options.perspective}
+          tilt={rolling ? 26 : 46}
+          spin={povSpin(povSeat, 4)}
+          zoom={rolling ? 0.86 : 1}
+        >
+          <Board
+            view={view}
+            nameOf={(s) => seatName(state.summary, s)}
+            shown={board.walk.shown}
+            walking={board.walk.walking}
+          />
+        </BoardStage>
+        {board.dice && <DiceStage dice={board.dice} />}
       </div>
       <div className="tv-sidebar">
+        {clock && (
+          <div className="tv-player-chip active">
+            <ClockRing reading={clock} />
+            <span className="grow">
+              {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}
+            </span>
+            <span className="tv-pov-label">
+              {view.phase === 'WALK' ? 'walking' : view.phase === 'PAY' ? 'paying' : view.phase.toLowerCase()}
+            </span>
+          </div>
+        )}
+        {view.pendingPayment && (
+          <div className="tv-player-chip">
+            💸 {seatName(state.summary, view.pendingPayment.seat)} owes ${view.pendingPayment.amount} —{' '}
+            {view.pendingPayment.reason}
+          </div>
+        )}
         {view.order.map((s) => {
           const p = view.players[s]!;
           return (
@@ -135,6 +246,8 @@ function TvView({ state }: TvViewProps<MonopolyPublic>) {
 
 function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPublic, MonopolyMove>) {
   const view = state.view;
+  const { clock, options } = useTable();
+  const board = useMonopolyBoard(view);
   const [bid, setBid] = useState('');
   const [showTrade, setShowTrade] = useState(false);
   const [tradeTo, setTradeTo] = useState<number | null>(null);
@@ -158,6 +271,12 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
   const legalFor = (kind: string, pos: number) =>
     legal.some((m) => m.kind === kind && (m as { position?: number }).position === pos);
 
+  // Manual mode: the only square you may step onto is the next one round, so
+  // the board can highlight it and take the tap directly.
+  const myWalk = view.pendingWalk?.seat === yourSeat ? view.pendingWalk : null;
+  const nextSquare = myTurnish && myWalk ? (me.position + 1) % BOARD.length : null;
+  const owed = view.pendingPayment?.seat === yourSeat ? view.pendingPayment : null;
+
   return (
     <div className="page wide">
       <div className="card center">
@@ -168,8 +287,34 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
           {me.bankrupt && <span className="badge">💀 bankrupt</span>}
         </div>
 
+        {clock && myTurnish && (
+          <div className="manual-bar">
+            <ClockRing reading={clock} />
+            <strong>Your turn</strong>
+          </div>
+        )}
+
         {state.status === 'completed' ? (
           <WinnerBanner state={state} />
+        ) : myWalk && myTurnish ? (
+          <>
+            <button className="big" onClick={() => submitMove('STEP_TOKEN', {})}>
+              👣 Step to {BOARD[(me.position + 1) % BOARD.length]!.name}
+            </button>
+            <p className="manual-hint">
+              {myWalk.remaining} of {myWalk.total} squares left — tap to walk your token.
+            </p>
+          </>
+        ) : owed && myTurnish ? (
+          <>
+            <button className="big pay-button" onClick={() => submitMove('PAY', {})}>
+              💸 Pay ${owed.amount}
+              {owed.to !== null ? ` to ${seatName(state.summary, owed.to)}` : ' to the bank'}
+            </button>
+            <p className="manual-hint">
+              {owed.reason} · you have ${me.cash}, leaving ${me.cash - owed.amount}
+            </p>
+          </>
         ) : !myTurnish ? (
           <p className="dim">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</p>
         ) : view.debt?.seat === yourSeat ? (
@@ -227,8 +372,20 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
         )}
       </div>
 
-      <div className="card">
-        <Board view={view} nameOf={(s) => (s === yourSeat ? 'You' : seatName(state.summary, s))} />
+      <div className="card" style={{ position: 'relative' }}>
+        {/* On a phone the board is tilted but never spun: your own view of the
+            table should not rotate out from under you between turns. */}
+        <BoardStage enabled={options.perspective} tilt={34} spin={0}>
+          <Board
+            view={view}
+            nameOf={(s) => (s === yourSeat ? 'You' : seatName(state.summary, s))}
+            shown={board.walk.shown}
+            walking={board.walk.walking}
+            targetSquare={nextSquare}
+            onTargetTap={() => submitMove('STEP_TOKEN', {})}
+          />
+        </BoardStage>
+        {board.dice && <DiceStage dice={board.dice} />}
       </div>
 
       {myProps.length > 0 && (

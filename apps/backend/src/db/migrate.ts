@@ -135,6 +135,10 @@ export async function migrateAppTables(db: Kysely<Database>): Promise<void> {
     b.addColumn('token_epoch', 'integer', (c) => c.notNull().defaultTo(0)),
   );
 
+  // Per-game table settings (manual mode, turn clock, animation) — added
+  // after the games table shipped, so existing rows fall back to defaults.
+  await addColumnIfMissing(db, 'games', 'options', (b) => b.addColumn('options', 'text'));
+
   await db.schema
     .createTable('allowed_emails')
     .ifNotExists()

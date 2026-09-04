@@ -28,6 +28,8 @@ export interface GamesTable {
   created_at: string;
   updated_at: string;
   ended_at: string | null;
+  /** JSON GameOptions chosen by the host in the lobby (manual mode, clock, …). */
+  options: string | null;
 }
 
 export interface GamePlayersTable {

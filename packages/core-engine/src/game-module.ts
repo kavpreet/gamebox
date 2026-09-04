@@ -1,7 +1,24 @@
-import type { Seat, Viewer, DisconnectOption } from '@gamebox/shared-types';
+import type {
+  Seat,
+  Viewer,
+  DisconnectOption,
+  Beat,
+  BeatKind,
+  GameOptions,
+} from '@gamebox/shared-types';
+import { DEFAULT_GAME_OPTIONS } from '@gamebox/shared-types';
 import type { SeededRandom } from './rng.js';
 
-export type { Seat, Viewer };
+export type { Seat, Viewer, Beat, BeatKind, GameOptions };
+export { DEFAULT_GAME_OPTIONS };
+
+/**
+ * Records the ordered steps inside one move so the client can replay them with
+ * pacing. Modules call `emit` where they used to overwrite a single
+ * `lastEvent` string — a module that never calls it still plays a correct
+ * game, it just tells no story.
+ */
+export type EmitBeat = (beat: Beat) => void;
 
 export interface GameState<TPublic, TPrivate> {
   public: TPublic;
@@ -19,6 +36,10 @@ export interface MoveCtx<TPublic, TPrivate, TMove> {
   seat: Seat;
   payload: TMove;
   rng: SeededRandom;
+  /** Narrate this move step by step. Presentation only — never rules. */
+  emit: EmitBeat;
+  /** Table settings frozen at game start (manual mode, clock, …). */
+  options: GameOptions;
 }
 
 export class IllegalMove extends Error {
@@ -41,7 +62,18 @@ export interface GameModule<TPublic = unknown, TPrivate = unknown, TMove = unkno
   maxPlayers: number;
   teams?: 'none' | 'optional' | 'required';
 
-  setup(seats: { seat: Seat; team?: number }[], rng: SeededRandom): GameState<TPublic, TPrivate>;
+  setup(
+    seats: { seat: Seat; team?: number }[],
+    rng: SeededRandom,
+    options?: GameOptions,
+  ): GameState<TPublic, TPrivate>;
+
+  /**
+   * Manual-mode support: true when this module splits its atomic moves into
+   * separate player-confirmed physical acts (walk the token, hand over the
+   * rent). The lobby only offers the manual toggle for modules that say yes.
+   */
+  supportsManual?: boolean;
 
   /** Who may act right now — derived from state on every call, never a static flag. */
   activePlayers(state: GameState<TPublic, TPrivate>): Seat[];

@@ -109,7 +109,7 @@ export const ludo: GameModule<LudoPublic, LudoPrivate, LudoMove> = {
   },
 
   moves: {
-    ROLL({ state, seat, rng }) {
+    ROLL({ state, seat, rng, emit }) {
       const pub = state.public;
       if (seat !== currentSeat(pub)) throw new IllegalMove('Not your turn');
       if (pub.phase !== 'ROLL') throw new IllegalMove('You already rolled — move a token');
@@ -117,17 +117,20 @@ export const ludo: GameModule<LudoPublic, LudoPrivate, LudoMove> = {
       const die = rng.int(1, 6);
       pub.die = die;
       pub.lastEvent = `rolled a ${die}`;
+      emit({ kind: 'dice', seat, text: `throws a ${die}`, data: { dice: [die] }, holdMs: 1200 });
 
       const movable = movableTokens(pub, seat, die);
       if (movable.length === 0) {
         pub.lastEvent = `rolled a ${die} — no moves`;
+        emit({ kind: 'say', seat, text: 'has no legal move', holdMs: 1200 });
         advanceTurn(pub, false); // even a 6 with no moves passes (all home edge case)
+        emit({ kind: 'turn', seat: currentSeat(pub), text: 'to throw', holdMs: 600 });
       } else {
         pub.phase = 'MOVE';
       }
     },
 
-    MOVE({ state, seat, payload }) {
+    MOVE({ state, seat, payload, emit }) {
       const pub = state.public;
       if (seat !== currentSeat(pub)) throw new IllegalMove('Not your turn');
       if (pub.phase !== 'MOVE' || pub.die === null) throw new IllegalMove('Roll first');
@@ -142,6 +145,13 @@ export const ludo: GameModule<LudoPublic, LudoPrivate, LudoMove> = {
       const to = from === -1 ? 0 : from + die;
       tokens[tokenIdx] = to;
       pub.lastEvent = from === -1 ? 'brought a token out' : `moved ${die}`;
+      emit({
+        kind: 'move',
+        seat,
+        text: from === -1 ? 'brings a token out of the yard' : `walks a token ${die}`,
+        data: { token: tokenIdx, from, to, steps: from === -1 ? 1 : die },
+        holdMs: from === -1 ? 900 : 250 + die * 200,
+      });
 
       // Captures — only on the shared main track, never on safe squares.
       const landedGlobal = globalSquare(pub, seat, to);
@@ -153,16 +163,32 @@ export const ludo: GameModule<LudoPublic, LudoPrivate, LudoMove> = {
             if (globalSquare(pub, otherSeat, p) === landedGlobal) {
               others[i] = -1;
               pub.lastEvent = 'captured a token!';
+              emit({
+                kind: 'capture',
+                seat,
+                text: 'sends a token back to the yard!',
+                data: { victim: otherSeat, token: i, at: landedGlobal },
+                holdMs: 1600,
+              });
             }
           });
         }
       }
 
+      if (to === HOME) {
+        emit({ kind: 'build', seat, text: 'gets a token home!', holdMs: 1400 });
+      }
       if (tokens.every((p) => p === HOME)) {
         pub.winner = seat;
+        emit({ kind: 'reveal', seat, text: 'has every token home — wins!', holdMs: 2400 });
         return;
       }
       advanceTurn(pub, die === 6);
+      emit(
+        die === 6
+          ? { kind: 'turn', seat, text: 'threw a 6 — throws again', holdMs: 800 }
+          : { kind: 'turn', seat: currentSeat(pub), text: 'to throw', holdMs: 600 },
+      );
     },
   },
 

@@ -1,4 +1,5 @@
 import type {
+  GameOptions,
   GameSummary,
   RoomDTO,
   AdminRoomDTO,
@@ -26,6 +27,8 @@ export interface GameTypeInfo {
   minPlayers: number;
   maxPlayers: number;
   teams: 'none' | 'optional' | 'required';
+  /** Whether this game splits its moves into hand-played steps (manual mode). */
+  supportsManual: boolean;
 }
 
 export interface AuthConfig {
@@ -36,7 +39,11 @@ export interface AuthConfig {
 export const api = {
   authConfig: () => req<AuthConfig>('GET', '/api/auth-config'),
   gameTypes: () => req<GameTypeInfo[]>('GET', '/api/game-types'),
-  createGame: (gameType: string) => req<GameSummary>('POST', '/api/games', { gameType }),
+  createGame: (gameType: string, options?: Partial<GameOptions>) =>
+    req<GameSummary>('POST', '/api/games', { gameType, options }),
+  gameOptions: (id: string) => req<GameOptions>('GET', `/api/games/${id}/options`),
+  setGameOptions: (id: string, options: Partial<GameOptions>) =>
+    req<GameOptions>('POST', `/api/games/${id}/options`, options),
   joinByPin: (pin: string) => req<GameSummary>('POST', '/api/games/join', { pin }),
   myGames: () => req<GameSummary[]>('GET', '/api/games/mine'),
   game: (id: string) => req<GameSummary>('GET', `/api/games/${id}`),

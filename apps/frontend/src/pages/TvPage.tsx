@@ -7,6 +7,8 @@ import { api } from '../api.js';
 import { getGameUi } from '../games/registry.js';
 import type { LiveState } from '../games/types.js';
 import { SeatTokens, WinnerBanner } from '../games/common.js';
+import { TableProvider } from '../games/table.js';
+import { TableChrome, TableTurnBanner } from '../games/chrome.js';
 
 /** Per-room so one browser can pair to several rooms (and a wipe is scoped). */
 const tokenKey = (code: string) => `gamebox.tv.token.${code}`;
@@ -187,25 +189,33 @@ export function TvPage() {
 
   const ui = getGameUi(state.summary.gameType);
   return (
-    <div className="tv-screen">
-      <div className="tv-header">
-        <span>
-          Game<span style={{ color: 'var(--accent)' }}>Box</span>
-          {state.status === 'paused' && <span style={{ color: 'var(--gold)' }}> — PAUSED</span>}
-        </span>
-        {state.summary.joinPin && <span className="dim">PIN {state.summary.joinPin}</span>}
-      </div>
-      {ui ? (
-        <ui.TvView state={state} />
-      ) : (
-        <div className="tv-main">
-          <div className="tv-board dim">No TV view registered for {state.summary.gameType}</div>
-          <div className="tv-sidebar">
-            <SeatTokens summary={state.summary} activeSeats={state.activeSeats} />
-            <WinnerBanner state={state} />
-          </div>
+    <TableProvider state={state}>
+      <div className="tv-screen" style={{ position: 'relative' }}>
+        <div className="tv-header">
+          <span>
+            Game<span style={{ color: 'var(--accent)' }}>Box</span>
+            {state.status === 'paused' && <span style={{ color: 'var(--gold)' }}> — PAUSED</span>}
+          </span>
+          {state.summary.joinPin && <span className="dim">PIN {state.summary.joinPin}</span>}
         </div>
-      )}
-    </div>
+        {state.status === 'active' && state.activeSeats.length > 0 && (
+          <TableTurnBanner seats={state.activeSeats} />
+        )}
+        {ui ? (
+          <ui.TvView state={state} />
+        ) : (
+          <div className="tv-main">
+            <div className="tv-board dim">No TV view registered for {state.summary.gameType}</div>
+            <div className="tv-sidebar">
+              <SeatTokens summary={state.summary} activeSeats={state.activeSeats} />
+              <WinnerBanner state={state} />
+            </div>
+          </div>
+        )}
+        {/* Narration and the sound unlock sit above whatever board is showing,
+            so a game UI never has to remember to render them. */}
+        <TableChrome showSoundGate />
+      </div>
+    </TableProvider>
   );
 }

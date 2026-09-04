@@ -16,9 +16,14 @@ import {
  * carries their actual hand — the view() projection is what keeps the TV and
  * other players from ever seeing card faces (plan §2's key milestone).
  *
- * Deliberate simplifications: no UNO-call penalty, no Wild-Draw-4 challenge,
- * drawn card may be played immediately or the turn passes (no keep-and-play-
- * something-else).
+ * The UNO call is modelled the way it works at a table: you declare it as you
+ * play your second-to-last card, and if you forget, the next player may catch
+ * you before they take their own turn. Only the seat whose turn it is can
+ * catch — the engine's activePlayers contract means nobody else can submit a
+ * move — which lands close to the real rule and needs no free-for-all window.
+ *
+ * Deliberate simplifications: no Wild-Draw-4 challenge, drawn card may be
+ * played immediately or the turn passes (no keep-and-play-something-else).
  */
 
 export interface UnoPublic {
@@ -34,6 +39,13 @@ export interface UnoPublic {
   phase: 'PLAY' | 'PLAY_DRAWN_OR_PASS';
   handCounts: Record<Seat, number>;
   drawPileSize: number;
+  /**
+   * A seat sitting on one card who did not call UNO. The next player may catch
+   * them; playing again (or being caught) closes the window.
+   */
+  unoPending: Seat | null;
+  /** Seats currently on one card who *did* call, so the UI can show it. */
+  unoCalled: Seat[];
   lastEvent: string | null;
   winner: Seat | null;
 }
@@ -43,9 +55,10 @@ export interface UnoPrivate {
 }
 
 export type UnoMove =
-  | { kind: 'PLAY'; card: number; chooseColor?: UnoColor }
+  | { kind: 'PLAY'; card: number; chooseColor?: UnoColor; callUno?: boolean }
   | { kind: 'DRAW' }
-  | { kind: 'PASS' };
+  | { kind: 'PASS' }
+  | { kind: 'CATCH_UNO' };
 
 interface Hidden {
   drawPile: UnoCard[];
@@ -203,7 +216,7 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
   return {
     slug: variant,
     displayName: variant === 'uno' ? 'UNO' : 'UNO Flip',
-    rulesVersion: '1.0.0',
+    rulesVersion: '1.1.0',
     minPlayers: 2,
     maxPlayers: 8,
     teams: 'none',
@@ -241,6 +254,8 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
           phase: 'PLAY',
           handCounts,
           drawPileSize: deck.length,
+          unoPending: null,
+          unoCalled: [],
           lastEvent: null,
           winner: null,
         },
@@ -254,11 +269,15 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
     },
 
     moves: {
-      PLAY({ state, seat, payload, rng }) {
+      PLAY({ state, seat, payload, rng, emit }) {
         const s = state as State;
         const pub = s.public;
         if (seat !== currentSeat(pub)) throw new IllegalMove('Not your turn');
-        const { card: cardIdx, chooseColor } = payload as { card: number; chooseColor?: UnoColor };
+        const { card: cardIdx, chooseColor, callUno } = payload as {
+          card: number;
+          chooseColor?: UnoColor;
+          callUno?: boolean;
+        };
         const hand = handOf(s, seat);
         const card = hand[cardIdx];
         if (!card) throw new IllegalMove('No such card');
@@ -272,8 +291,53 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
         hiddenOf(s).discard.push(card);
         const steps = applyEffect(s, seat, face, chooseColor, rng);
         pub.discardTop = faceOf(card, pub.side);
-        pub.lastEvent = `played ${describeFace(face)}${hand.length === 1 ? ' — UNO!' : ''}`;
+        emit({
+          kind: 'card',
+          seat,
+          text: `plays ${describeFace(face)}`,
+          data: { face: describeFace(face) },
+          holdMs: 950,
+        });
+
+        // Playing again always closes this seat's own window, called or not.
+        pub.unoCalled = pub.unoCalled.filter((x) => x !== seat);
+        if (pub.unoPending === seat) pub.unoPending = null;
+
+        if (hand.length === 1) {
+          if (callUno) {
+            pub.unoCalled = [...pub.unoCalled, seat];
+            emit({ kind: 'reveal', seat, text: 'UNO!', holdMs: 1500 });
+          } else {
+            pub.unoPending = seat;
+          }
+        }
+        pub.lastEvent = `played ${describeFace(face)}${hand.length === 1 && callUno ? ' — UNO!' : ''}`;
         finishPlay(s, seat, steps);
+      },
+
+      /**
+       * Catch a player who dropped to one card without calling UNO. Only the
+       * seat whose turn it now is may do this — that is who the engine has
+       * marked active, and it is also who would notice first at a real table.
+       */
+      CATCH_UNO({ state, seat, rng, emit }) {
+        const s = state as State;
+        const pub = s.public;
+        if (seat !== currentSeat(pub)) throw new IllegalMove('Not your turn');
+        const target = pub.unoPending;
+        if (target === null) throw new IllegalMove('Nobody to catch');
+        if (target === seat) throw new IllegalMove('You cannot catch yourself');
+        pub.unoPending = null;
+        drawCards(s, target, 2, rng);
+        refreshCounts(s);
+        pub.lastEvent = 'caught them without calling UNO — draw 2!';
+        emit({
+          kind: 'capture',
+          seat,
+          text: 'catches a missed UNO — draw 2!',
+          data: { target },
+          holdMs: 1900,
+        });
       },
 
       DRAW({ state, seat, rng }) {
@@ -310,6 +374,10 @@ function makeModule(variant: 'uno' | 'uno-flip'): GameModule<UnoPublic, UnoPriva
       if (pub.winner !== null || seat !== currentSeat(pub)) return [];
       const hand = handOf(s, seat);
       const moves: UnoMove[] = [];
+
+      // Catching is offered alongside whatever else you may do — you never have
+      // to choose between calling someone out and taking your turn.
+      if (pub.unoPending !== null && pub.unoPending !== seat) moves.push({ kind: 'CATCH_UNO' });
 
       if (pub.phase === 'PLAY_DRAWN_OR_PASS') {
         const idx = hand.length - 1;
