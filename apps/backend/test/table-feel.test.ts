@@ -6,7 +6,13 @@ import {
   castTakebackVote,
   isUncontested,
 } from '@gamebox/core-engine';
-import { DEFAULT_TABLE_OPTIONS, normalizeTableOptions } from '@gamebox/shared-types';
+import {
+  DEFAULT_TABLE_OPTIONS,
+  normalizeTableOptions,
+  iconPaletteFor,
+  isValidSeatIcon,
+  SEAT_ICON_PALETTE,
+} from '@gamebox/shared-types';
 import { snakesAndLadders, type SnlPublic } from '@gamebox/game-snakes-and-ladders';
 import { monopoly, type MonopolyPublic } from '@gamebox/game-monopoly';
 import { ludo } from '@gamebox/game-ludo';
@@ -362,5 +368,23 @@ describe('uno call', () => {
     expect(pub.unoDeclared).toContain(caller);
     const other = rt.activeSeats()[0]!;
     expect(() => rt.applyMove(other, 'CATCH_UNO', { target: caller })).toThrow(IllegalMove);
+  });
+});
+
+describe('per-game token palettes', () => {
+  it('offers Monopoly its own pieces and rejects the generic emoji there', () => {
+    const mono = iconPaletteFor('monopoly');
+    expect(mono).toContain('🎩');
+    expect(mono).not.toContain('🦄');
+    expect(new Set(mono).size).toBe(mono.length);
+    expect(isValidSeatIcon('🎩', 'monopoly')).toBe(true);
+    expect(isValidSeatIcon('🦄', 'monopoly')).toBe(false);
+  });
+
+  it('leaves every other game on the shared emoji list', () => {
+    expect(iconPaletteFor('chess')).toBe(SEAT_ICON_PALETTE);
+    expect(iconPaletteFor(null)).toBe(SEAT_ICON_PALETTE);
+    expect(isValidSeatIcon('🦄', 'chess')).toBe(true);
+    expect(isValidSeatIcon('🎩', 'chess')).toBe(false);
   });
 });

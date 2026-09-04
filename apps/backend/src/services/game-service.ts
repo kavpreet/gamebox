@@ -231,7 +231,10 @@ export class GameService {
     const game = await this.requireGame(gameId);
     if (game.status !== 'lobby') throw new GameServiceError('Can only customize before the game starts', 'CONFLICT');
     if (color !== null && !isValidSeatColor(color)) throw new GameServiceError('Unknown color', 'BAD_REQUEST');
-    if (icon !== null && !isValidSeatIcon(icon)) throw new GameServiceError('Unknown icon', 'BAD_REQUEST');
+    // the valid token set is per game — Monopoly is played with Monopoly pieces
+    if (icon !== null && !isValidSeatIcon(icon, game.game_type)) {
+      throw new GameServiceError('Unknown icon', 'BAD_REQUEST');
+    }
 
     const players = await this.playersOf(gameId);
     const me = players.find((p) => p.user_id === userId);

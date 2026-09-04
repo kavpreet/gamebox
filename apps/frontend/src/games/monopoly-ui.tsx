@@ -3,10 +3,12 @@ import type { MonopolyPublic, MonopolyMove } from '@gamebox/game-monopoly';
 import { BOARD, rentFor, CHEST_CARDS } from '@gamebox/game-monopoly';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
 import { TableStage, TableLog } from './chrome.js';
+import { useBoardSpin } from './anim.js';
 import type { GameSummary } from '@gamebox/shared-types';
 import {
-  seatName, seatColor, SeatDot, SeatToken, WinnerBanner, Prompt, Waiting, Die, EventLine, useBoardFit,
+  seatName, seatColor, SeatDot, WinnerBanner, Prompt, Waiting, Die, EventLine, useBoardFit,
   FxDefs, HandGlyph, CaptureBlast, type HandPhase, useDiceRoll, useCashDeltas, type CashDelta,
+  SeatPiece, shadeHex,
 } from './common.js';
 
 const GROUP_HEX: Record<string, string> = {
@@ -39,7 +41,7 @@ function easeInOutQuad(t: number): number {
 /** first token slot inside a cell — where the hand sets the mover down */
 function tokenXY(pos: number, C: number): { x: number; y: number } {
   const [cx, cy] = cellOf(pos);
-  return { x: cx * C + 13, y: cy * C + 42 };
+  return { x: cx * C + 15, y: cy * C + 50 };
 }
 
 interface MonoAnim {
@@ -290,6 +292,14 @@ function splitName(name: string): string[] {
 
 function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }) {
   const C = 62;
+  /**
+   * The table turns to face whoever is up, but the *writing* on it must not:
+   * on a real board the players move around a fixed table, so every label,
+   * price, piece and the centre logo counter-rotate by the board's current
+   * spin and stay upright from where you are sitting.
+   */
+  const spin = useBoardSpin();
+  const upright = (ax: number, ay: number) => `rotate(${-spin} ${ax} ${ay})`;
   const { anim, jailFx } = useMonopolyAnim(view, C);
   const diceKey = view.lastRoll
     ? `${view.lastRoll.d1},${view.lastRoll.d2},${view.turnIndex},${view.order.map((s) => view.players[s]!.position).join('.')}`
@@ -303,6 +313,7 @@ function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }
     const x = cx * C;
     const y = cy * C;
     const prop = view.properties[pos];
+    const ownColor = prop ? seatColor(summary, prop.owner) : null;
     const groupColor = sp.group ? GROUP_HEX[sp.group] : null;
     const corner = CORNER_ART[sp.type];
     // which cell edge the color band sits on (inner edge, facing the center)
@@ -352,41 +363,52 @@ function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }
     cells.push(
       <g key={pos}>
         <rect x={x + 1} y={y + 1} width={C - 2} height={C - 2} rx={3}
-          fill={corner ? '#ece4cc' : '#f4eedb'} stroke="#23283f" strokeWidth={1.4} />
-        {band}
-        {corner ? (
-          <>
-            <text x={x + C / 2} y={y + C / 2 + 4} textAnchor="middle" fontSize={22}>{corner.emoji}</text>
-            <text x={x + C / 2} y={y + C - 7} textAnchor="middle" fontSize={8.5} fontWeight={900}
-              fill="#3b4160" letterSpacing={0.5}>{corner.label}</text>
-          </>
-        ) : (
-          <>
-            {nameLines.map((ln, i) => (
-              <text key={i} x={ctX} y={ctY + 12 + i * 9} textAnchor="middle"
-                fontSize={7.6} fontWeight={800} fill="#2b2f45">
-                {ln}
-              </text>
-            ))}
-            {TYPE_EMOJI[sp.type] && (
-              <text x={ctX} y={ctY + 36} textAnchor="middle" fontSize={14} opacity={0.95}>
-                {TYPE_EMOJI[sp.type]}
-              </text>
-            )}
-            {sp.price !== undefined && !prop && (
-              <text x={ctX} y={ctY + 47} textAnchor="middle" fontSize={8} fill="#6b7090" fontWeight={800}>
-                ${sp.price}
-              </text>
-            )}
-          </>
+          fill={corner ? '#ece4cc' : '#f4eedb'}
+          stroke={ownColor ?? '#23283f'} strokeWidth={ownColor ? 2.6 : 1.4} />
+        {/* Owned squares are washed in the owner's color and framed in it. A
+            marker in the corner tells you a square is *taken*; the tile itself
+            carrying the color is what lets you see a monopoly forming from
+            across the room. */}
+        {ownColor && (
+          <rect x={x + 1} y={y + 1} width={C - 2} height={C - 2} rx={3}
+            fill={ownColor} opacity={prop!.mortgaged ? 0.13 : 0.32} />
         )}
+        {band}
+        <g transform={upright(x + C / 2, y + C / 2)}>
+          {corner ? (
+            <>
+              <text x={x + C / 2} y={y + C / 2 + 4} textAnchor="middle" fontSize={22}>{corner.emoji}</text>
+              <text x={x + C / 2} y={y + C - 7} textAnchor="middle" fontSize={8.5} fontWeight={900}
+                fill="#3b4160" letterSpacing={0.5}>{corner.label}</text>
+            </>
+          ) : (
+            <>
+              {nameLines.map((ln, i) => (
+                <text key={i} x={ctX} y={ctY + 12 + i * 9} textAnchor="middle"
+                  fontSize={7.6} fontWeight={800} fill="#2b2f45">
+                  {ln}
+                </text>
+              ))}
+              {TYPE_EMOJI[sp.type] && (
+                <text x={ctX} y={ctY + 36} textAnchor="middle" fontSize={14} opacity={0.95}>
+                  {TYPE_EMOJI[sp.type]}
+                </text>
+              )}
+              {sp.price !== undefined && !prop && (
+                <text x={ctX} y={ctY + 47} textAnchor="middle" fontSize={8} fill="#6b7090" fontWeight={800}>
+                  ${sp.price}
+                </text>
+              )}
+            </>
+          )}
+        </g>
         {housePips.length > 0 && (
           <g key={`hp${pos}-${prop!.houses}`} className="gb-pop">{housePips}</g>
         )}
         {prop && (
           <g opacity={prop.mortgaged ? 0.55 : 1}>
             <circle cx={ownX} cy={ownY} r={7} fill="#ffffff" />
-            <circle cx={ownX} cy={ownY} r={5.5} fill={seatColor(summary, prop.owner)} stroke="#23283f" strokeWidth={1.4} />
+            <circle cx={ownX} cy={ownY} r={5.5} fill={ownColor!} stroke="#23283f" strokeWidth={1.4} />
             {prop.mortgaged && (
               <line x1={ownX - 6} y1={ownY + 6} x2={ownX + 6} y2={ownY - 6} stroke="#c92a2a" strokeWidth={2.2} />
             )}
@@ -406,20 +428,23 @@ function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }
   const tokens: React.ReactElement[] = [];
   for (const [pos, seats] of bySpace) {
     const [cx, cy] = cellOf(pos);
+    // pieces stand up out of the square, so they are ordered back-to-front and
+    // sit low in the cell to leave room above for the ones behind them
     seats.forEach((s, i) => {
-      const tx = cx * C + 13 + (i % 3) * 13;
-      const ty = cy * C + 42 + Math.floor(i / 3) * 6;
+      const { x: x0, y: y0 } = tokenXY(pos, C);
+      const tx = x0 + (i % 3) * 15;
+      const ty = y0 - Math.floor(i / 3) * 9;
       tokens.push(
         <g key={s} className="board-token" data-pos={pos}>
-          <SeatToken summary={summary} seat={s} cx={tx} cy={ty} r={8.5} />
+          <SeatPiece summary={summary} seat={s} cx={tx} cy={ty} r={7.5} spin={spin} />
         </g>,
       );
     });
   }
   if (anim) {
     tokens.push(
-      <g key={`anim${anim.seat}`} style={{ filter: 'drop-shadow(0 4px 5px rgba(0,0,0,0.55))', pointerEvents: 'none' }}>
-        <SeatToken summary={summary} seat={anim.seat} cx={anim.x} cy={anim.y} r={10} />
+      <g key={`anim${anim.seat}`} style={{ filter: 'drop-shadow(0 5px 6px rgba(0,0,0,0.55))', pointerEvents: 'none' }}>
+        <SeatPiece summary={summary} seat={anim.seat} cx={anim.x} cy={anim.y} r={8.5} spin={spin} />
         <HandGlyph x={anim.x} y={anim.y} phase={anim.phase} t={anim.t} size={C * 0.62} />
       </g>,
     );
@@ -444,7 +469,7 @@ function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }
       <rect width={W} height={W} rx={14} fill="#23283f" />
       <rect x={C} y={C} width={9 * C} height={9 * C} rx={6} fill="url(#mono-center)" stroke="#23283f" strokeWidth={2} />
       {cells}
-      <g transform={`rotate(-45 ${W / 2} ${W / 2})`}>
+      <g transform={`${upright(W / 2, W / 2)} rotate(-45 ${W / 2} ${W / 2})`}>
         <rect x={W / 2 - 3.6 * C} y={W / 2 - 0.55 * C} width={7.2 * C} height={1.1 * C} rx={8}
           fill="#e23f44" stroke="#ffffff" strokeWidth={3} />
         <text x={W / 2} y={W / 2 + 13} textAnchor="middle" fontSize={40} fontWeight={900}
@@ -452,46 +477,50 @@ function Board({ view, summary }: { view: MonopolyPublic; summary: GameSummary }
           MONOPOLY
         </text>
       </g>
-      {view.lastRoll && (
-        <g>
-          {diceFaces.map((d, i) => {
-            const dx = W / 2 - 42 + i * 48;
-            const dy = 6.55 * C;
-            const pips: Record<number, [number, number][]> = {
-              1: [[0.5, 0.5]], 2: [[0.25, 0.25], [0.75, 0.75]], 3: [[0.25, 0.25], [0.5, 0.5], [0.75, 0.75]],
-              4: [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]],
-              5: [[0.25, 0.25], [0.75, 0.25], [0.5, 0.5], [0.25, 0.75], [0.75, 0.75]],
-              6: [[0.25, 0.25], [0.75, 0.25], [0.25, 0.5], [0.75, 0.5], [0.25, 0.75], [0.75, 0.75]],
-            };
-            // tumbling dice bounce and twist a little; settled dice pop in place
-            const rot = rolling ? ((d * 47 + i * 29) % 21) - 10 : 0;
-            const dyJit = rolling ? ((d * 31 + i * 17) % 7) - 3 : 0;
-            return (
-              <g key={rolling ? `t${i}` : `s${i}-${d}`}
-                transform={`rotate(${rot} ${dx + 18} ${dy + 18}) translate(0 ${dyJit})`}
-                className={rolling ? undefined : 'gb-pop'}>
-                <rect x={dx} y={dy} width={36} height={36} rx={8} fill="#f2f4ff" stroke="#0b0e1d" strokeWidth={1.5} />
-                {(pips[d] ?? []).map(([px, py], j) => (
-                  <circle key={j} cx={dx + px * 36} cy={dy + py * 36} r={3.4} fill="#1a1e38" />
-                ))}
-              </g>
-            );
-          })}
-        </g>
-      )}
-      {view.freeParkingPot > 0 && (
-        <text x={W / 2} y={7.45 * C} textAnchor="middle" fontSize={16} fill="#b8860b" fontWeight={900}>
-          🅿️ Free Parking jackpot: ${view.freeParkingPot}
-        </text>
-      )}
-      {view.lastCard && (
-        <text x={W / 2} y={7.9 * C} textAnchor="middle" fontSize={15} fill="#8a5200" fontWeight={800}>
-          {view.lastCard}
-        </text>
-      )}
-      {view.lastEvent && (
-        <text x={W / 2} y={8.35 * C} textAnchor="middle" fontSize={13.5} fill="#3b4160" fontWeight={600}>{view.lastEvent}</text>
-      )}
+      {/* the whole centre of the table — dice, jackpot, card and event lines —
+          stays upright no matter which edge the board is turned to */}
+      <g transform={upright(W / 2, W / 2)}>
+        {view.lastRoll && (
+          <g>
+            {diceFaces.map((d, i) => {
+              const dx = W / 2 - 42 + i * 48;
+              const dy = 6.55 * C;
+              const pips: Record<number, [number, number][]> = {
+                1: [[0.5, 0.5]], 2: [[0.25, 0.25], [0.75, 0.75]], 3: [[0.25, 0.25], [0.5, 0.5], [0.75, 0.75]],
+                4: [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]],
+                5: [[0.25, 0.25], [0.75, 0.25], [0.5, 0.5], [0.25, 0.75], [0.75, 0.75]],
+                6: [[0.25, 0.25], [0.75, 0.25], [0.25, 0.5], [0.75, 0.5], [0.25, 0.75], [0.75, 0.75]],
+              };
+              // tumbling dice bounce and twist a little; settled dice pop in place
+              const rot = rolling ? ((d * 47 + i * 29) % 21) - 10 : 0;
+              const dyJit = rolling ? ((d * 31 + i * 17) % 7) - 3 : 0;
+              return (
+                <g key={rolling ? `t${i}` : `s${i}-${d}`}
+                  transform={`rotate(${rot} ${dx + 18} ${dy + 18}) translate(0 ${dyJit})`}
+                  className={rolling ? undefined : 'gb-pop'}>
+                  <rect x={dx} y={dy} width={36} height={36} rx={8} fill="#f2f4ff" stroke="#0b0e1d" strokeWidth={1.5} />
+                  {(pips[d] ?? []).map(([px, py], j) => (
+                    <circle key={j} cx={dx + px * 36} cy={dy + py * 36} r={3.4} fill="#1a1e38" />
+                  ))}
+                </g>
+              );
+            })}
+          </g>
+        )}
+        {view.freeParkingPot > 0 && (
+          <text x={W / 2} y={7.45 * C} textAnchor="middle" fontSize={16} fill="#b8860b" fontWeight={900}>
+            🅿️ Free Parking jackpot: ${view.freeParkingPot}
+          </text>
+        )}
+        {view.lastCard && (
+          <text x={W / 2} y={7.9 * C} textAnchor="middle" fontSize={15} fill="#8a5200" fontWeight={800}>
+            {view.lastCard}
+          </text>
+        )}
+        {view.lastEvent && (
+          <text x={W / 2} y={8.35 * C} textAnchor="middle" fontSize={13.5} fill="#3b4160" fontWeight={600}>{view.lastEvent}</text>
+        )}
+      </g>
       <rect width={W} height={W} rx={14} fill="url(#gb-boardlight)" style={{ pointerEvents: 'none' }} />
       {tokens}
     </svg>

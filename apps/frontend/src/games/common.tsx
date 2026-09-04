@@ -72,6 +72,81 @@ export function SeatToken({ summary, seat, cx, cy, r }: {
   );
 }
 
+/** Mix a hex color towards black (amount < 0) or white (amount > 0). */
+export function shadeHex(hex: string, amount: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  const n = parseInt(m[1]!, 16);
+  const mix = (c: number) =>
+    Math.round(amount >= 0 ? c + (255 - c) * amount : c * (1 + amount))
+      .toString(16)
+      .padStart(2, '0');
+  return `#${mix((n >> 16) & 255)}${mix((n >> 8) & 255)}${mix(n & 255)}`;
+}
+
+/**
+ * A player's piece as an actual *standing* token, for boards played on a
+ * tilted 3D table.
+ *
+ * SeatToken is a counter lying flat on the board; this one has a base, a
+ * tapered stem and a head that rises towards the camera, which is what makes
+ * a piece findable at a glance on a busy board instead of reading as one more
+ * colored dot among the tile markers. `spin` is the board's current turn: the
+ * piece counter-rotates by it so it always stands up towards the viewer, the
+ * way a real piece does when you turn the table.
+ */
+export function SeatPiece({ summary, seat, cx, cy, r, spin = 0, dim }: {
+  summary: GameSummary;
+  seat: Seat;
+  cx: number;
+  cy: number;
+  /** Radius of the head — the piece stands about 2.7× this tall in total. */
+  r: number;
+  spin?: number;
+  dim?: boolean;
+}) {
+  const color = seatColor(summary, seat);
+  const icon = seatIcon(summary, seat);
+  const dark = shadeHex(color, -0.42);
+  const light = shadeHex(color, 0.32);
+  const h = r * 1.75; // how far the head sits above the square it stands on
+  // one gradient per seat, not per position: a walking piece moves every frame
+  const gid = `gb-piece-${seat}`;
+  return (
+    <g transform={`rotate(${-spin} ${cx} ${cy})`} opacity={dim ? 0.55 : 1}>
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor={dark} />
+          <stop offset="45%" stopColor={color} />
+          <stop offset="100%" stopColor={dark} />
+        </linearGradient>
+      </defs>
+      {/* cast shadow on the square, so the piece reads as above the board */}
+      <ellipse cx={cx + r * 0.22} cy={cy + r * 0.1} rx={r * 1.15} ry={r * 0.45} fill="rgba(0,0,0,0.42)" />
+      {/* base disc */}
+      <ellipse cx={cx} cy={cy} rx={r * 0.98} ry={r * 0.4} fill={dark} stroke="rgba(0,0,0,0.5)" strokeWidth={0.8} />
+      {/* tapered stem from the base up to the head */}
+      <path
+        d={`M ${cx - r * 0.92} ${cy} C ${cx - r * 0.5} ${cy - h * 0.45}, ${cx - r * 0.62} ${cy - h * 0.7}, ${cx - r * 0.5} ${cy - h * 0.86}
+            L ${cx + r * 0.5} ${cy - h * 0.86}
+            C ${cx + r * 0.62} ${cy - h * 0.7}, ${cx + r * 0.5} ${cy - h * 0.45}, ${cx + r * 0.92} ${cy} Z`}
+        fill={`url(#${gid})`}
+        stroke="rgba(0,0,0,0.45)"
+        strokeWidth={0.8}
+      />
+      {/* head */}
+      <circle cx={cx} cy={cy - h} r={r} fill={color} stroke="#ffffff" strokeWidth={Math.max(1.2, r * 0.16)} />
+      <circle cx={cx} cy={cy - h} r={r * 0.96} fill={`url(#gb-shine)`} style={{ pointerEvents: 'none' }} />
+      <ellipse cx={cx - r * 0.3} cy={cy - h - r * 0.36} rx={r * 0.3} ry={r * 0.2} fill={light} opacity={0.75} />
+      {icon && (
+        <text x={cx} y={cy - h + r * 0.38} textAnchor="middle" fontSize={r * 1.25} style={{ pointerEvents: 'none' }}>
+          {icon}
+        </text>
+      )}
+    </g>
+  );
+}
+
 function easeInOutQuad(t: number): number {
   return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 }

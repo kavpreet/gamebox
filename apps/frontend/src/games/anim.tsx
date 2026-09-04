@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { Seat } from '@gamebox/shared-types';
 import type { BeatPlayer, ClockReading } from './beats.js';
 import { sfx, soundReady, unlockSound } from './sfx.js';
@@ -30,6 +30,20 @@ export interface StageProps {
 }
 
 /**
+ * How far the board under this subtree is currently turned, in degrees.
+ *
+ * Boards whose squares carry writing read it back and counter-rotate their
+ * labels: the *board* should turn to face you, but the text on it must never
+ * end up upside-down, which is what a physical board gets for free by having
+ * the players' heads move instead of the table.
+ */
+const BoardSpinContext = createContext(0);
+
+export function useBoardSpin(): number {
+  return useContext(BoardSpinContext);
+}
+
+/**
  * Tilts the board into a table you're sitting at, and turns it to face whoever
  * is up. The rotation is the point: on a real board you physically see the
  * layout from your own side, and turning the screen to match is what makes a
@@ -43,18 +57,26 @@ export function BoardStage({
   enabled = true,
   className = '',
 }: StageProps) {
-  if (!enabled) return <div className={`board-flat ${className}`}>{children}</div>;
+  if (!enabled) {
+    return (
+      <BoardSpinContext.Provider value={0}>
+        <div className={`board-flat ${className}`}>{children}</div>
+      </BoardSpinContext.Provider>
+    );
+  }
   return (
-    <div className={`board-stage ${className}`}>
-      <div
-        className="board-stage-inner"
-        style={{
-          transform: `translateZ(0) scale(${zoom}) rotateX(${tilt}deg) rotateZ(${spin}deg)`,
-        }}
-      >
-        {children}
+    <BoardSpinContext.Provider value={spin}>
+      <div className={`board-stage ${className}`}>
+        <div
+          className="board-stage-inner"
+          style={{
+            transform: `translateZ(0) scale(${zoom}) rotateX(${tilt}deg) rotateZ(${spin}deg)`,
+          }}
+        >
+          {children}
+        </div>
       </div>
-    </div>
+    </BoardSpinContext.Provider>
   );
 }
 

@@ -188,6 +188,22 @@ export const SEAT_ICON_PALETTE = [
   '🐯', '🐼', '🐧', '🦄', '🐲', '🦖', '👑', '⭐', '🔥', '⚡',
 ] as const;
 
+/**
+ * Games whose pieces are part of the game's identity get their own token set
+ * instead of the generic emoji list. Monopoly is played with *the* Monopoly
+ * pieces — a top hat and a Scottie dog read as Monopoly in a way a frog and a
+ * unicorn never will — so its lobby only offers those, and the shared
+ * uniqueness rule then guarantees no two players hold the same piece.
+ */
+export const GAME_ICON_PALETTES: Record<string, readonly string[]> = {
+  monopoly: ['🎩', '🏎️', '🚢', '🐕', '🐈', '🦖', '🐧', '🦆'],
+};
+
+/** The token set a given game's lobby offers; the generic emoji list by default. */
+export function iconPaletteFor(gameType: string | null | undefined): readonly string[] {
+  return (gameType && GAME_ICON_PALETTES[gameType]) || SEAT_ICON_PALETTE;
+}
+
 /** The first 6 palette entries double as the default (uncustomized) seat colors. */
 export function defaultSeatColor(seat: number): string {
   return SEAT_COLOR_PALETTE[seat % 6]!;
@@ -197,8 +213,8 @@ export function isValidSeatColor(c: string): boolean {
   return (SEAT_COLOR_PALETTE as readonly string[]).includes(c);
 }
 
-export function isValidSeatIcon(i: string): boolean {
-  return (SEAT_ICON_PALETTE as readonly string[]).includes(i);
+export function isValidSeatIcon(i: string, gameType?: string | null): boolean {
+  return iconPaletteFor(gameType).includes(i);
 }
 
 /**
