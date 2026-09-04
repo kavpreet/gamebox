@@ -469,19 +469,73 @@ export function Waiting({ state }: { state: LiveState<any, any> }) {
 const PIP_CELLS: Record<number, number[]> = {
   1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8],
 };
+/**
+ * Which way to turn the cube so a given value ends up facing the viewer, and
+ * where each of the six faces sits on it.
+ */
+const DIE_REST: Record<number, string> = {
+  1: 'rotateX(0deg) rotateY(0deg)',
+  2: 'rotateY(-90deg)',
+  3: 'rotateX(-90deg)',
+  4: 'rotateX(90deg)',
+  5: 'rotateY(90deg)',
+  6: 'rotateY(180deg)',
+};
+
+function dieFaceTransform(face: number, size: number): string {
+  const d = size / 2;
+  switch (face) {
+    case 2: return `rotateY(90deg) translateZ(${d}px)`;
+    case 3: return `rotateX(90deg) translateZ(${d}px)`;
+    case 4: return `rotateX(-90deg) translateZ(${d}px)`;
+    case 5: return `rotateY(-90deg) translateZ(${d}px)`;
+    case 6: return `rotateY(180deg) translateZ(${d}px)`;
+    default: return `translateZ(${d}px)`;
+  }
+}
+
+/**
+ * A real cube rather than a picture of one: six faces rotated into place, so a
+ * throw tumbles in three dimensions and settles with the rolled value toward
+ * the viewer. `useDiceRoll` still decides *when* it is rolling, so every
+ * caller's timing (and the boards that hold a token while the dice are in the
+ * air) is unchanged.
+ */
 export function Die({ value, size = 52, rollKey }: { value: number; size?: number; rollKey?: string }) {
   const { faces, rolling } = useDiceRoll(rollKey ?? String(value), [value]);
   const face = faces[0]!;
-  const pips = PIP_CELLS[face] ?? [];
   return (
-    <span
-      className={`die ${rolling ? 'tumbling' : 'rolled'}`}
-      key={rolling ? 'tumble' : `v${value}`}
-      style={{ width: size, height: size }}
-    >
-      {Array.from({ length: 9 }, (_, i) => (
-        <span key={i} className={pips.includes(i) ? 'pip' : ''} style={{ width: size * 0.17, height: size * 0.17 }} />
-      ))}
+    <span className="die-scene" style={{ width: size, height: size }}>
+      <span
+        className={`die-cube ${rolling ? 'rolling' : 'settled'}`}
+        style={{
+          width: size,
+          height: size,
+          transform: rolling ? undefined : DIE_REST[value] ?? DIE_REST[1],
+        }}
+      >
+        {[1, 2, 3, 4, 5, 6].map((f) => {
+          const pips = PIP_CELLS[f] ?? [];
+          return (
+            <span
+              key={f}
+              className="die-face"
+              style={{ width: size, height: size, transform: dieFaceTransform(f, size) }}
+            >
+              {Array.from({ length: 9 }, (_, i) => (
+                <span
+                  key={i}
+                  className={pips.includes(i) ? 'pip' : ''}
+                  style={{ width: size * 0.17, height: size * 0.17 }}
+                />
+              ))}
+            </span>
+          );
+        })}
+      </span>
+      {/* While tumbling the cube shows random faces; keep the value readable to
+          screen readers regardless of where the cube happens to be pointing. */}
+      <span className="sr-only">{rolling ? 'rolling' : `rolled ${face}`}</span>
     </span>
   );
 }

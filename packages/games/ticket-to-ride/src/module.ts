@@ -1,4 +1,4 @@
-import type { GameModule, GameState, Seat } from '@gamebox/core-engine';
+import type { GameModule, GameState, Seat, EmitBeat, BeatKind } from '@gamebox/core-engine';
 import { IllegalMove } from '@gamebox/core-engine';
 import {
   ROUTE_POINTS, TRAIN_COLORS,
@@ -133,9 +133,23 @@ function aliveSeats(pub: TtrPublic): Seat[] {
 
 const LOG_LIMIT = 20;
 
-function logEvent(pub: TtrPublic, seat: Seat | null, text: string): void {
+/**
+ * Append to the running action log, and narrate the same step as a beat.
+ *
+ * The log is a scrollback nobody watches mid-turn; the beat is what the room
+ * actually sees. Passing `emit` here means every move that already logged now
+ * narrates too, without touching the moves themselves.
+ */
+function logEvent(
+  pub: TtrPublic,
+  seat: Seat | null,
+  text: string,
+  emit?: EmitBeat,
+  opts: { kind?: BeatKind; data?: Record<string, unknown>; holdMs?: number } = {},
+): void {
   pub.log.push({ seat, text });
   if (pub.log.length > LOG_LIMIT) pub.log.splice(0, pub.log.length - LOG_LIMIT);
+  emit?.({ kind: opts.kind ?? 'say', seat, text, data: opts.data, holdMs: opts.holdMs });
 }
 
 const NICE_CITY = (c: string) =>
@@ -253,6 +267,7 @@ function endTurn(state: State): void {
     pub.endTriggeredBy = seat;
     pub.turnsRemaining = aliveSeats(pub).length; // everyone gets one last turn
     pub.lastEvent = 'Final round — everyone gets one more turn!';
+    logEvent(pub, null, 'Final round — everyone gets one more turn!');
     logEvent(pub, seat, `is almost out of trains — final round, one turn each! 🏁`);
   }
   if (pub.turnsRemaining !== null && pub.turnsRemaining <= 0) {
@@ -357,7 +372,7 @@ function makeTtrModule(
   },
 
   moves: {
-    CHOOSE_TICKETS({ state, seat, payload }) {
+    CHOOSE_TICKETS({ state, seat, payload, emit }) {
       const s = state as State;
       const pub = s.public;
       const priv = privOf(s, seat);
@@ -375,13 +390,14 @@ function makeTtrModule(
         if (pub.choosing.filter((x) => !pub.removed.includes(x)).length === 0) {
           pub.phase = 'PLAY';
           pub.lastEvent = 'All aboard!';
+          emit({ kind: 'reveal', seat: null, text: 'All aboard!', holdMs: 1600 });
         }
       } else {
         endTurn(s);
       }
     },
 
-    DRAW_BLIND({ state, seat, rng }) {
+    DRAW_BLIND({ state, seat, rng, emit }) {
       const s = state as State;
       const pub = s.public;
       if (pub.phase !== 'PLAY' || seat !== currentSeat(pub)) throw new IllegalMove('Not your turn');
@@ -395,11 +411,11 @@ function makeTtrModule(
       pub.deckSize = hidden.trainDeck.length;
       pub.discardSize = hidden.trainDiscard.length;
       pub.drawnThisTurn += 1;
-      logEvent(pub, seat, 'drew a card from the deck');
+      logEvent(pub, seat, 'drew a card from the deck', emit, { kind: 'card', holdMs: 850 });
       if (pub.drawnThisTurn >= 2) endTurn(s);
     },
 
-    DRAW_FACEUP({ state, seat, payload, rng }) {
+    DRAW_FACEUP({ state, seat, payload, rng, emit }) {
       const s = state as State;
       const pub = s.public;
       if (pub.phase !== 'PLAY' || seat !== currentSeat(pub)) throw new IllegalMove('Not your turn');
@@ -415,7 +431,13 @@ function makeTtrModule(
       priv.hand.push(card);
       pub.handCounts[seat] = priv.hand.length;
       refillFaceUp(pub, hiddenOf(s), (x) => rng.shuffle(x));
-      logEvent(pub, seat, card === 'loco' ? 'took the locomotive 🌈' : `took a ${card} card`);
+      logEvent(
+        pub,
+        seat,
+        card === 'loco' ? 'took the locomotive 🌈' : `took a ${card} card`,
+        emit,
+        { kind: card === 'loco' ? 'reveal' : 'card', data: { card }, holdMs: card === 'loco' ? 1500 : 900 },
+      );
       if (card === 'loco') {
         endTurn(s);
       } else {
@@ -424,7 +446,7 @@ function makeTtrModule(
       }
     },
 
-    CLAIM_ROUTE({ state, seat, payload }) {
+    CLAIM_ROUTE({ state, seat, payload, emit }) {
       const s = state as State;
       const pub = s.public;
       if (pub.phase !== 'PLAY' || seat !== currentSeat(pub)) throw new IllegalMove('Not your turn');
@@ -447,11 +469,21 @@ function makeTtrModule(
       pub.trainsLeft[seat] = (pub.trainsLeft[seat] ?? 0) - def.length;
       pub.routeScores[seat] = (pub.routeScores[seat] ?? 0) + (ROUTE_POINTS[def.length] ?? 0);
       pub.lastEvent = `${def.a} — ${def.b} claimed (+${ROUTE_POINTS[def.length]})`;
-      logEvent(pub, seat, `built ${NICE_CITY(def.a)} — ${NICE_CITY(def.b)} (+${ROUTE_POINTS[def.length]}) 🚂`);
+      logEvent(
+        pub,
+        seat,
+        `built ${NICE_CITY(def.a)} — ${NICE_CITY(def.b)} (+${ROUTE_POINTS[def.length]}) 🚂`,
+        emit,
+        {
+          kind: 'build',
+          data: { route, from: def.a, to: def.b, length: def.length },
+          holdMs: 1100 + def.length * 180,
+        },
+      );
       endTurn(s);
     },
 
-    DRAW_TICKETS({ state, seat }) {
+    DRAW_TICKETS({ state, seat, emit }) {
       const s = state as State;
       const pub = s.public;
       if (pub.phase !== 'PLAY' || seat !== currentSeat(pub)) throw new IllegalMove('Not your turn');
@@ -463,7 +495,7 @@ function makeTtrModule(
       priv.offer = hidden.ticketDeck.splice(0, 3);
       pub.choosing.push(seat);
       pub.ticketDeckSize = hidden.ticketDeck.length;
-      logEvent(pub, seat, 'is drawing destination tickets…');
+      logEvent(pub, seat, 'is drawing destination tickets…', emit, { kind: 'card', holdMs: 1100 });
       // turn ends when CHOOSE_TICKETS resolves
     },
   },

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import type { RiskPublic, RiskMove } from '@gamebox/game-risk';
 import { ADJACENCY } from '@gamebox/game-risk';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
+import { TableStage } from './chrome.js';
 import type { GameSummary } from '@gamebox/shared-types';
 import {
   seatName, seatColor, SeatTokens, WinnerBanner, Prompt, Waiting, useBoardFit,
@@ -150,7 +151,9 @@ function TvView({ state }: TvViewProps<RiskPublic>) {
   return (
     <div className="tv-main">
       <div className="tv-board">
-        <Map view={view} summary={state.summary} />
+        <TableStage sides={4} tilt={28} rotate={false}>
+          <Map view={view} summary={state.summary} />
+        </TableStage>
       </div>
       <div className="tv-sidebar">
         <SeatTokens summary={state.summary} activeSeats={state.activeSeats} />

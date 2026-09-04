@@ -333,3 +333,30 @@ describe('ticket to ride gameplay', () => {
     }
   });
 });
+
+describe('ticket to ride narration', () => {
+  it('narrates a draw as its own beat', () => {
+    const rt = newGame(4, 3);
+    throughInitialTickets(rt);
+    const seat = rt.activeSeats()[0]!;
+    const res = rt.applyMove(seat, 'DRAW_BLIND', {});
+    expect(res.beats.length).toBeGreaterThan(0);
+    const drew = res.beats.find((b) => b.text.includes('drew a card'));
+    expect(drew).toBeDefined();
+    expect(drew!.seat).toBe(seat);
+    expect(drew!.kind).toBe('card');
+  });
+
+  it('keeps the action log and the beats in step', () => {
+    const rt = newGame(4, 3);
+    throughInitialTickets(rt);
+    const seat = rt.activeSeats()[0]!;
+    const before = pub(rt).log.length;
+    const res = rt.applyMove(seat, 'DRAW_BLIND', {});
+    const after = pub(rt).log;
+    // Every beat this move emitted also reached the scrollback, so the two
+    // views of what happened can't drift apart.
+    expect(after.length).toBe(before + 1);
+    expect(res.beats.some((b) => b.text === after[after.length - 1]!.text)).toBe(true);
+  });
+});

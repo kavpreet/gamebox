@@ -4,6 +4,7 @@ import {
   cornersOf, hexCenter, vertexXY, edgeVertices, hexKey, RESOURCES,
 } from '@gamebox/game-catan';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
+import { TableStage } from './chrome.js';
 import type { GameSummary } from '@gamebox/shared-types';
 import {
   seatName, seatColor, SeatDot, WinnerBanner, Prompt, Waiting, EventLine, useBoardFit,
@@ -238,7 +239,9 @@ function TvView({ state }: TvViewProps<CatanView>) {
   return (
     <div className="tv-main">
       <div className="tv-board">
-        <Board view={view} summary={state.summary} />
+        <TableStage sides={4} tilt={42}>
+          <Board view={view} summary={state.summary} />
+        </TableStage>
       </div>
       <div className="tv-sidebar">
         <Sidebar state={state} view={view} />

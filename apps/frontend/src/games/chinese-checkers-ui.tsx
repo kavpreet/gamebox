@@ -3,6 +3,7 @@ import type { GameSummary } from '@gamebox/shared-types';
 import type { CCPublic, CCMove } from '@gamebox/game-chinese-checkers';
 import { allCells, destinations } from '@gamebox/game-chinese-checkers';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
+import { TableStage } from './chrome.js';
 import { seatName, SeatToken, SeatTokens, WinnerBanner, Prompt, Waiting, useHandMove, HandGlyph, FxDefs, useBoardFit } from './common.js';
 
 const R = 16; // hole radius in svg units
@@ -104,7 +105,9 @@ function TvView({ state }: TvViewProps<CCPublic>) {
   return (
     <div className="tv-main">
       <div className="tv-board">
-        <Board view={view} summary={state.summary} />
+        <TableStage sides={6} tilt={44}>
+          <Board view={view} summary={state.summary} />
+        </TableStage>
       </div>
       <div className="tv-sidebar">
         <SeatTokens summary={state.summary} activeSeats={state.activeSeats} />
