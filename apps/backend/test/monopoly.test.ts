@@ -134,6 +134,51 @@ describe('monopoly gameplay', () => {
     expect(rt.endResult?.winners).toEqual([b]);
   });
 
+  it('log lines name the seat that caused them', () => {
+    const rt = newGame(6, 3);
+    const pub = pubOf(rt);
+    const a = pub.order[pub.turnIndex]!;
+    const b = a === 0 ? 1 : 0;
+
+    pub.phase = 'ACT';
+    pub.pendingBuy = 39;
+    rt.applyMove(a, 'BUY', {});
+    expect(pub.lastEventSeat).toBe(a);
+    expect(pub.lastEvent).toContain('bought');
+
+    // an event caused by another seat re-attributes the line
+    pub.properties[5] = { owner: b, houses: 0, mortgaged: false };
+    pub.phase = 'ACT';
+    pub.properties[15] = { owner: a, houses: 0, mortgaged: false };
+    rt.applyMove(a, 'PROPOSE_TRADE', { to: b, giveProps: [15], giveCash: 0, getProps: [5], getCash: 0 });
+    expect(pub.lastEventSeat).toBe(a);
+    rt.applyMove(b, 'RESPOND_TRADE', { accept: false });
+    expect(pub.lastEventSeat).toBe(b);
+    expect(pub.lastEvent).toContain('rejected');
+  });
+
+  it('"went to jail" points at the seat that is actually in jail', () => {
+    const rt = newGame(7, 3);
+    const pub = pubOf(rt);
+    let sawJail = 0;
+    let guard = 0;
+    while (rt.currentStatus === 'active' && guard++ < 400) {
+      const actives = rt.activeSeats();
+      if (actives.length === 0) break;
+      const seat = actives[0]!;
+      const moves = rt.legalMoves(seat) as any[];
+      if (moves.length === 0) break;
+      const move = moves[0];
+      rt.applyMove(seat, move.kind, move.kind === 'BID' ? { amount: 0 } : move);
+      if (pub.lastRoll) expect(pub.lastRollSeat).not.toBeNull();
+      if (pub.lastEvent === 'went to jail') {
+        sawJail += 1;
+        expect(pub.players[pub.lastEventSeat!]!.inJail).toBe(true);
+      }
+    }
+    expect(sawJail).toBeGreaterThan(0); // the playout must actually exercise jail
+  });
+
   it('random playout stays legal for hundreds of moves', () => {
     const rt = newGame(11, 3);
     let guard = 0;

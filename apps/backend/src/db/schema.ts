@@ -66,6 +66,24 @@ export interface RoomsTable {
   pairing_code: string;
   active_game_id: string | null;
   last_seen_at: string | null;
+  /** scrypt hash of the room PIN ("salt:derivedKey"). null = no PIN set yet. */
+  pin_hash: string | null;
+  /**
+   * Bumped to invalidate every device token issued for this room. Tokens are
+   * stateless (signed, not stored), so this counter is the revocation handle:
+   * a token carrying a stale epoch stops verifying.
+   */
+  token_epoch: number;
+}
+
+/**
+ * DB-backed family allowlist (seeded from ALLOWED_EMAILS on first boot).
+ * Being on this list permits *account creation*; it is not a session.
+ */
+export interface AllowedEmailsTable {
+  email: string; // lowercase, primary key
+  added_by: string | null; // user id of the admin who added it
+  added_at: string;
 }
 
 /**
@@ -81,6 +99,7 @@ export interface AuthUserTable {
 
 export interface Database {
   user: AuthUserTable;
+  allowed_emails: AllowedEmailsTable;
   games: GamesTable;
   game_players: GamePlayersTable;
   moves: MovesTable;

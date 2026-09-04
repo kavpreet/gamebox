@@ -51,7 +51,10 @@ export interface MonopolyPublic {
   debt: { seat: Seat; amount: number; creditor: Seat | null } | null;
   pendingTrade: Trade | null;
   lastCard: string | null;
+  /** Seat the log line / dice roll belongs to, so the UI can name the actor. */
+  lastRollSeat: Seat | null;
   lastEvent: string | null;
+  lastEventSeat: Seat | null;
   winner: Seat | null;
 }
 
@@ -136,19 +139,27 @@ function credit(pub: MonopolyPublic, seat: Seat, amount: number): void {
   pub.players[seat]!.cash += amount;
 }
 
+/** Record a log line together with the seat that caused it (null = the bank). */
+function say(pub: MonopolyPublic, seat: Seat | null, text: string): void {
+  pub.lastEvent = text;
+  pub.lastEventSeat = seat;
+}
+
 function sendToJail(pub: MonopolyPublic, seat: Seat): void {
   const p = pub.players[seat]!;
   p.position = JAIL_POSITION;
   p.inJail = true;
   p.jailTurns = 0;
   pub.doubles = false; // no extra roll
-  pub.lastEvent = 'went to jail';
+  say(pub, seat, 'went to jail');
 }
 
 function drawCard(pub: MonopolyPublic, seat: Seat, deck: 'chance' | 'chest', rng: SeededRandom, diceTotal: number): void {
   const cards = deck === 'chance' ? CHANCE_CARDS : CHEST_CARDS;
   const card = cards[rng.int(0, cards.length - 1)]!;
   pub.lastCard = card.text;
+  // attribute the draw up front — effects below overwrite it with their own line
+  say(pub, seat, `drew ${deck === 'chance' ? 'Chance' : 'Community Chest'}`);
   const p = pub.players[seat]!;
   const e = card.effect;
   if (e.kind === 'money') {
@@ -191,13 +202,13 @@ function resolveLanding(pub: MonopolyPublic, seat: Seat, rng: SeededRandom, dice
         pub.pendingBuy = p.position;
       } else if (prop.owner !== seat && !prop.mortgaged) {
         const rent = rentFor(pub, p.position, diceTotal);
-        pub.lastEvent = `owes $${rent} rent on ${sp.name}`;
+        say(pub, seat, `owes $${rent} rent on ${sp.name}`);
         charge(pub, seat, rent, prop.owner);
       }
       break;
     }
     case 'tax':
-      pub.lastEvent = `pays ${sp.name} $${sp.taxAmount}`;
+      say(pub, seat, `pays ${sp.name} $${sp.taxAmount}`);
       charge(pub, seat, sp.taxAmount!, null);
       break;
     case 'chance':
@@ -250,7 +261,7 @@ function doBankruptcy(pub: MonopolyPublic, seat: Seat, creditor: Seat | null): v
     }
   }
   pub.debt = null;
-  pub.lastEvent = 'went bankrupt';
+  say(pub, seat, 'went bankrupt');
   checkWinner(pub);
   if (pub.winner === null && currentSeat(pub) === seat) {
     advanceTurn(pub);
@@ -301,7 +312,9 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
         debt: null,
         pendingTrade: null,
         lastCard: null,
+        lastRollSeat: null,
         lastEvent: null,
+        lastEventSeat: null,
         winner: null,
       },
       private: priv,
@@ -329,13 +342,14 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       const d1 = rng.int(1, 6);
       const d2 = rng.int(1, 6);
       pub.lastRoll = { d1, d2 };
+      pub.lastRollSeat = seat;
       const p = pub.players[seat]!;
 
       if (p.inJail) {
         if (d1 === d2) {
           p.inJail = false;
           p.jailTurns = 0;
-          pub.lastEvent = 'rolled doubles — out of jail!';
+          say(pub, seat, 'rolled doubles — out of jail!');
         } else {
           p.jailTurns += 1;
           if (p.jailTurns >= 3) {
@@ -343,9 +357,9 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
             if ((pub.phase as string) === 'DEBT') return; // couldn't pay the fine
             p.inJail = false;
             p.jailTurns = 0;
-            pub.lastEvent = 'paid the fine after 3 tries';
+            say(pub, seat, 'paid the fine after 3 tries');
           } else {
-            pub.lastEvent = 'stuck in jail';
+            say(pub, seat, 'stuck in jail');
             pub.phase = 'ACT';
             return;
           }
@@ -393,7 +407,7 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       p.cash -= price;
       pub.properties[pos] = { owner: seat, houses: 0, mortgaged: false };
       pub.pendingBuy = null;
-      pub.lastEvent = `bought ${space(pos).name}`;
+      say(pub, seat, `bought ${space(pos).name}`);
     },
 
     DECLINE_BUY({ state, seat }) {
@@ -403,7 +417,7 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       pub.auction = { position: pub.pendingBuy, bids: {} };
       pub.pendingBuy = null;
       pub.phase = 'AUCTION';
-      pub.lastEvent = `${space(pub.auction.position).name} goes to auction — sealed bids!`;
+      say(pub, seat, `sent ${space(pub.auction.position).name} to auction — sealed bids!`);
     },
 
     BID({ state, seat, payload }) {
@@ -428,9 +442,9 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       if (top > 0) {
         pub.players[winner]!.cash -= top;
         pub.properties[pub.auction.position] = { owner: winner, houses: 0, mortgaged: false };
-        pub.lastEvent = `auction won for $${top}`;
+        say(pub, winner, `won ${space(pub.auction.position).name} at auction for $${top}`);
       } else {
-        pub.lastEvent = 'auction ended with no bids';
+        say(pub, null, `${space(pub.auction.position).name} got no bids`);
       }
       pub.auction = null;
       pub.phase = 'ACT';
@@ -454,7 +468,7 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       if (pub.players[seat]!.cash < cost) throw new IllegalMove('Not enough cash');
       pub.players[seat]!.cash -= cost;
       prop.houses += 1;
-      pub.lastEvent = `built on ${sp.name}`;
+      say(pub, seat, `built on ${sp.name}`);
     },
 
     SELL_HOUSE({ state, seat, payload }) {
@@ -473,7 +487,7 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       if (prop.houses < maxHouses) throw new IllegalMove('Sell evenly across the group');
       prop.houses -= 1;
       credit(pub, seat, Math.floor(sp.houseCost! / 2));
-      pub.lastEvent = `sold a house on ${sp.name}`;
+      say(pub, seat, `sold a house on ${sp.name}`);
     },
 
     MORTGAGE({ state, seat, payload }) {
@@ -491,7 +505,7 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       }
       prop.mortgaged = true;
       credit(pub, seat, Math.floor(sp.price! / 2));
-      pub.lastEvent = `mortgaged ${sp.name}`;
+      say(pub, seat, `mortgaged ${sp.name}`);
     },
 
     UNMORTGAGE({ state, seat, payload }) {
@@ -505,7 +519,7 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       if (pub.players[seat]!.cash < cost) throw new IllegalMove('Not enough cash');
       pub.players[seat]!.cash -= cost;
       prop.mortgaged = false;
-      pub.lastEvent = `unmortgaged ${sp.name}`;
+      say(pub, seat, `unmortgaged ${sp.name}`);
     },
 
     PAY_JAIL({ state, seat }) {
@@ -518,7 +532,7 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       p.cash -= JAIL_FINE;
       p.inJail = false;
       p.jailTurns = 0;
-      pub.lastEvent = 'paid the jail fine';
+      say(pub, seat, 'paid the jail fine');
       // still phase ROLL — they roll and move normally now
     },
 
@@ -550,7 +564,7 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
         if (prop.houses > 0) throw new IllegalMove('Streets with buildings cannot be traded');
       }
       pub.pendingTrade = trade;
-      pub.lastEvent = 'proposed a trade';
+      say(pub, seat, 'proposed a trade');
     },
 
     RESPOND_TRADE({ state, seat, payload }) {
@@ -561,19 +575,19 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       const { accept } = payload as { accept: boolean };
       pub.pendingTrade = null;
       if (!accept) {
-        pub.lastEvent = 'rejected the trade';
+        say(pub, seat, 'rejected the trade');
         return;
       }
       // re-validate cash (state may have changed) then execute
       if (pub.players[trade.from]!.cash < trade.giveCash || pub.players[trade.to]!.cash < trade.getCash) {
-        pub.lastEvent = 'trade fell through (not enough cash)';
+        say(pub, null, 'the trade fell through (not enough cash)');
         return;
       }
       pub.players[trade.from]!.cash += trade.getCash - trade.giveCash;
       pub.players[trade.to]!.cash += trade.giveCash - trade.getCash;
       for (const pos of trade.giveProps) pub.properties[pos]!.owner = trade.to;
       for (const pos of trade.getProps) pub.properties[pos]!.owner = trade.from;
-      pub.lastEvent = 'trade accepted!';
+      say(pub, seat, 'accepted the trade!');
     },
 
     CANCEL_TRADE({ state, seat }) {
@@ -581,7 +595,7 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       const trade = pub.pendingTrade;
       if (!trade || trade.from !== seat) throw new IllegalMove('No trade of yours to cancel');
       pub.pendingTrade = null;
-      pub.lastEvent = 'withdrew the trade';
+      say(pub, seat, 'withdrew the trade');
     },
 
     RESOLVE_DEBT({ state, seat }) {
@@ -594,7 +608,7 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
       if (debt.creditor !== null) credit(pub, debt.creditor, debt.amount);
       pub.debt = null;
       pub.phase = 'ACT';
-      pub.lastEvent = 'settled the debt';
+      say(pub, seat, 'settled the debt');
     },
 
     DECLARE_BANKRUPTCY({ state, seat }) {
@@ -725,6 +739,7 @@ export const monopoly: GameModule<MonopolyPublic, MonopolyPrivate, MonopolyMove>
         if (top > 0) {
           pub.players[winner]!.cash -= top;
           pub.properties[pub.auction.position] = { owner: winner, houses: 0, mortgaged: false };
+          say(pub, winner, `won ${space(pub.auction.position).name} at auction for $${top}`);
         }
         pub.auction = null;
         pub.phase = 'ACT';

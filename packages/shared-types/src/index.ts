@@ -44,6 +44,28 @@ export interface RoomDTO {
   activeGameId: string | null;
 }
 
+/** Admin-only room row: never carries the PIN itself, only whether one is set. */
+export interface AdminRoomDTO extends RoomDTO {
+  hasPin: boolean;
+  lastSeenAt: string | null;
+}
+
+export interface AllowedEmailDTO {
+  email: string;
+  addedAt: string;
+  hasAccount: boolean;
+  isAdmin: boolean;
+  userId: string | null;
+  displayName: string | null;
+}
+
+export interface MeDTO {
+  id: string;
+  email: string;
+  displayName: string;
+  isAdmin: boolean;
+}
+
 /** Viewer identity passed to a GameModule's `view()` — a seat, or the passive TV/spectator sentinel. */
 export type Viewer = Seat | 'SPECTATOR';
 

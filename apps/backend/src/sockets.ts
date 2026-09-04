@@ -19,6 +19,8 @@ interface SocketData {
   displayName: string | null;
   /** gameIds this socket has joined as a seated player, mapped to seat. */
   seats: Map<string, Seat>;
+  /** set once a TV proves a valid device token via tv:watch. */
+  tvRoomId: string | null;
 }
 
 interface GamePresence {
@@ -168,7 +170,7 @@ export function setupSockets(
 
   io.use(async (socket, next) => {
     // Player sockets carry the better-auth session cookie; TV sockets have none.
-    const data: SocketData = { userId: null, displayName: null, seats: new Map() };
+    const data: SocketData = { userId: null, displayName: null, seats: new Map(), tvRoomId: null };
     try {
       const session = await auth.api.getSession({
         headers: fromNodeHeaders(socket.handshake.headers),
@@ -188,12 +190,20 @@ export function setupSockets(
     const data = socket.data as SocketData;
 
     // ── TV / kiosk ──────────────────────────────────────────────────────────
-    socket.on('tv:watch', async (payload: { room: string }, ack?: (r: unknown) => void) => {
+    socket.on('tv:watch', async (payload: { room: string; token?: string }, ack?: (r: unknown) => void) => {
       try {
-        const room = await rooms.ensureRoom(payload.room);
+        // A TV proves itself with a device token from /api/tv/pair, not a
+        // session cookie. No token (or a revoked one) → the kiosk shows its
+        // PIN prompt again; rooms are never created from here.
+        const room = await rooms.authorizeToken(payload.token);
+        if (!room) {
+          ack?.({ ok: false, error: 'unpaired', needsPin: true });
+          return;
+        }
         for (const r of socket.rooms) {
           if (r.startsWith('room:') || r.startsWith('tv:')) socket.leave(r);
         }
+        data.tvRoomId = room.id;
         socket.join(pairedRoom(room.pairingCode));
         if (room.activeGameId) {
           socket.join(tvRoom(room.activeGameId));
@@ -207,6 +217,11 @@ export function setupSockets(
 
     socket.on('game:watch', async (payload: { gameId: string }, ack?: (r: unknown) => void) => {
       try {
+        // Spectating is for signed-in users and paired TVs — otherwise this
+        // route would hand out the SPECTATOR view of any game id to anyone.
+        if (!data.userId && !data.tvRoomId) {
+          throw new GameServiceError('Not signed in', 'UNAUTHORIZED');
+        }
         await games.requireGame(payload.gameId);
         socket.join(tvRoom(payload.gameId));
         await broadcastState(payload.gameId);
@@ -356,8 +371,26 @@ export function setupSockets(
     if (gameId) await broadcastState(gameId);
   }
 
+  /**
+   * An admin revoked (or deleted, or re-PINned) a room: drop every TV currently
+   * paired to it right now instead of waiting for the next reconnect, and tell
+   * the kiosk to show its PIN prompt again.
+   */
+  async function evictRoomDevices(roomId: string): Promise<void> {
+    for (const s of await io.fetchSockets()) {
+      const sd = s.data as SocketData;
+      if (sd?.tvRoomId !== roomId) continue;
+      for (const r of s.rooms) {
+        if (r.startsWith('room:') || r.startsWith('tv:')) s.leave(r);
+      }
+      sd.tvRoomId = null;
+      s.emit('tv:unpaired');
+    }
+  }
+
   (io as any).gameboxBroadcast = broadcastState;
   (io as any).gameboxNotifyRoom = notifyRoomAssignment;
+  (io as any).gameboxEvictRoom = evictRoomDevices;
   return io;
 }
 
@@ -367,6 +400,10 @@ export function getBroadcast(io: SocketIOServer): (gameId: string) => Promise<vo
 
 export function getNotifyRoom(io: SocketIOServer): (code: string, gameId: string | null) => Promise<void> {
   return (io as any).gameboxNotifyRoom;
+}
+
+export function getEvictRoom(io: SocketIOServer): (roomId: string) => Promise<void> {
+  return (io as any).gameboxEvictRoom;
 }
 
 function errMessage(err: unknown): string {

@@ -18,7 +18,7 @@ function cellOf(pos: number): [number, number] {
   return [10, pos - 30];
 }
 
-function Board({ view, mini }: { view: MonopolyPublic; mini?: boolean }) {
+function Board({ view, nameOf }: { view: MonopolyPublic; nameOf: (seat: number) => string }) {
   const C = 62;
   const cells: React.ReactElement[] = [];
   BOARD.forEach((sp, pos) => {
@@ -74,6 +74,9 @@ function Board({ view, mini }: { view: MonopolyPublic; mini?: boolean }) {
       <text x={5.5 * C} y={4.6 * C} textAnchor="middle" fontSize={30} fontWeight={900} fill="#39406e">MONOPOLY</text>
       {view.lastRoll && (
         <text x={5.5 * C} y={5.5 * C} textAnchor="middle" fontSize={32} fill="#eef0ff">
+          {view.lastRollSeat !== null && (
+            <tspan fontSize={16} fill="#9aa0c3">{nameOf(view.lastRollSeat)} rolled </tspan>
+          )}
           🎲 {view.lastRoll.d1} + {view.lastRoll.d2}
         </text>
       )}
@@ -81,7 +84,14 @@ function Board({ view, mini }: { view: MonopolyPublic; mini?: boolean }) {
         <text x={5.5 * C} y={6.3 * C} textAnchor="middle" fontSize={14} fill="#f5a623">{view.lastCard}</text>
       )}
       {view.lastEvent && (
-        <text x={5.5 * C} y={6.9 * C} textAnchor="middle" fontSize={13} fill="#9aa0c3">{view.lastEvent}</text>
+        <text x={5.5 * C} y={6.9 * C} textAnchor="middle" fontSize={13} fill="#9aa0c3">
+          {view.lastEventSeat !== null && (
+            <tspan fill={SEAT_COLORS[view.lastEventSeat % 6]} fontWeight={700}>
+              {nameOf(view.lastEventSeat)}{' '}
+            </tspan>
+          )}
+          {view.lastEvent}
+        </text>
       )}
     </svg>
   );
@@ -93,7 +103,7 @@ function TvView({ state }: TvViewProps<MonopolyPublic>) {
   return (
     <div className="tv-main">
       <div className="tv-board">
-        <Board view={view} />
+        <Board view={view} nameOf={(s) => seatName(state.summary, s)} />
       </div>
       <div className="tv-sidebar">
         {view.order.map((s) => {
@@ -218,7 +228,7 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<MonopolyPub
       </div>
 
       <div className="card">
-        <Board view={view} />
+        <Board view={view} nameOf={(s) => (s === yourSeat ? 'You' : seatName(state.summary, s))} />
       </div>
 
       {myProps.length > 0 && (

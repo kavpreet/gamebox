@@ -1,4 +1,10 @@
-import type { GameSummary, RoomDTO } from '@gamebox/shared-types';
+import type {
+  GameSummary,
+  RoomDTO,
+  AdminRoomDTO,
+  AllowedEmailDTO,
+  MeDTO,
+} from '@gamebox/shared-types';
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -41,4 +47,25 @@ export const api = {
   rooms: () => req<RoomDTO[]>('GET', '/api/rooms'),
   assignRoom: (code: string, gameId: string | null) =>
     req<RoomDTO>('POST', `/api/rooms/${code}/assign`, { gameId }),
+
+  me: () => req<MeDTO>('GET', '/api/me'),
+
+  /** TV pairing — the only call the kiosk makes without a session. */
+  pairTv: (room: string, pin: string) =>
+    req<{ token: string; room: RoomDTO }>('POST', '/api/tv/pair', { room, pin }),
+
+  admin: {
+    rooms: () => req<AdminRoomDTO[]>('GET', '/api/admin/rooms'),
+    createRoom: (name: string, pairingCode: string, pin: string) =>
+      req<AdminRoomDTO[]>('POST', '/api/admin/rooms', { name, pairingCode, pin }),
+    updateRoom: (id: string, patch: { name?: string; pin?: string }) =>
+      req<AdminRoomDTO[]>('PATCH', `/api/admin/rooms/${id}`, patch),
+    revokeRoom: (id: string) => req<AdminRoomDTO[]>('POST', `/api/admin/rooms/${id}/revoke`),
+    roomToken: (id: string) => req<{ token: string }>('POST', `/api/admin/rooms/${id}/token`),
+    deleteRoom: (id: string) => req<AdminRoomDTO[]>('DELETE', `/api/admin/rooms/${id}`),
+    users: () => req<AllowedEmailDTO[]>('GET', '/api/admin/users'),
+    addUser: (email: string) => req<AllowedEmailDTO[]>('POST', '/api/admin/users', { email }),
+    removeUser: (email: string) =>
+      req<AllowedEmailDTO[]>('DELETE', `/api/admin/users/${encodeURIComponent(email)}`),
+  },
 };

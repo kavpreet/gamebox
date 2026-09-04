@@ -66,13 +66,29 @@ export const config = {
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
 
   /**
-   * Family allowlist: comma-separated emails permitted to create accounts.
-   * Empty = allow anyone (dev convenience only — set this in production!).
+   * Family allowlist SEED: comma-separated emails permitted to create accounts.
+   * These are copied into the `allowed_emails` table on first boot; after that
+   * the table is the source of truth and is managed from /admin. Kept as an
+   * env var so a fresh deploy has someone who can log in.
+   * Empty seed + empty table = allow anyone (dev convenience only).
    */
   allowedEmails: (process.env.ALLOWED_EMAILS ?? '')
     .split(',')
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean),
+
+  /**
+   * Who may reach /admin. Env-only on purpose: admin rights can never be
+   * granted (or lost) through the app itself, so there is no lockout path —
+   * worst case you edit .env and restart.
+   */
+  adminEmails: (process.env.ADMIN_EMAILS ?? 's.gagan.preet@gmail.com')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean),
+
+  /** How long a paired TV's device token stays valid (days). */
+  tvTokenDays: Number(process.env.TV_TOKEN_DAYS ?? 365),
 
   /** Grace period before a disconnected seat becomes vote-eligible (ms). */
   disconnectGraceMs: Number(process.env.DISCONNECT_GRACE_MS ?? 60_000),
@@ -83,4 +99,9 @@ export const config = {
 
 export function isGoogleEnabled(): boolean {
   return Boolean(config.googleClientId && config.googleClientSecret);
+}
+
+export function isAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return config.adminEmails.includes(email.trim().toLowerCase());
 }
