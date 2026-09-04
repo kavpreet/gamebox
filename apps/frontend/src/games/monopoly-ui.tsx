@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { MonopolyPublic, MonopolyMove } from '@gamebox/game-monopoly';
 import { BOARD, rentFor, CHEST_CARDS } from '@gamebox/game-monopoly';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
+import { TableStage } from './chrome.js';
 import type { GameSummary } from '@gamebox/shared-types';
 import {
   seatName, seatColor, SeatDot, SeatToken, WinnerBanner, Prompt, Waiting, Die, EventLine, useBoardFit,
@@ -576,7 +577,12 @@ function TvView({ state }: TvViewProps<MonopolyPublic>) {
   return (
     <div className="tv-main" ref={mainRef} style={{ position: 'relative' }}>
       <div className="tv-board" ref={boardRef} style={{ position: 'relative' }}>
-        <Board view={view} summary={state.summary} />
+        {/* Only the board itself is tilted. The deed/chance cards and the
+            auction panel below stay flat and face the room — and boardRef
+            stays untransformed, so the cash-flyer geometry is unaffected. */}
+        <TableStage sides={4} tilt={46}>
+          <Board view={view} summary={state.summary} />
+        </TableStage>
         {view.pendingBuy !== null && (
           <Delayed key={`buy${view.pendingBuy}`} ms={DICE_MS + 1500}>
             <div className="board-overlay">

@@ -3,6 +3,7 @@ import type { GameSummary } from '@gamebox/shared-types';
 import type { LudoPublic, LudoMove } from '@gamebox/game-ludo';
 import { HOME, SAFE_GLOBALS, globalSquare, destinationOf } from '@gamebox/game-ludo';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
+import { TableStage } from './chrome.js';
 import {
   seatColor, SeatToken, SeatTokens, WinnerBanner, Prompt, Waiting, Die, EventLine, useBoardFit,
   FxDefs, HandGlyph, CaptureBlast, RebirthPulse, type HandPhase,
@@ -392,7 +393,9 @@ function TvView({ state }: TvViewProps<LudoPublic>) {
   return (
     <div className="tv-main">
       <div className="tv-board">
-        <Board view={view} summary={state.summary} />
+        <TableStage sides={4} tilt={46}>
+          <Board view={view} summary={state.summary} />
+        </TableStage>
       </div>
       <div className="tv-sidebar">
         <SeatTokens summary={state.summary} activeSeats={state.activeSeats} />
