@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import QRCode from 'qrcode';
 import type { RoomDTO, Seat, DisconnectOption } from '@gamebox/shared-types';
-import { SEAT_COLOR_PALETTE, SEAT_ICON_PALETTE, defaultSeatColor } from '@gamebox/shared-types';
+import { SEAT_COLOR_PALETTE, iconPaletteFor, defaultSeatColor } from '@gamebox/shared-types';
 import { useSession } from '../auth-client.js';
 import { api, type GameTypeInfo } from '../api.js';
 import { getSocket, emitAck } from '../socket.js';
@@ -447,7 +447,7 @@ function Lobby({ state, isHost, yourSeat }: { state: LiveState; isHost: boolean;
             >
               No icon
             </button>
-            {SEAT_ICON_PALETTE.map((icon) => {
+            {iconPaletteFor(summary.gameType).map((icon) => {
               const taken = takenIcons.has(icon);
               return (
                 <button
