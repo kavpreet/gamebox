@@ -74,11 +74,12 @@ export function TableLog({ limit = 6 }: { limit?: number }) {
 /**
  * Puts a board on a table you are sitting at.
  *
- * Two things happen here. The board is tilted away from the viewer so it reads
- * as a physical surface rather than a diagram, and on the TV it *turns* to
- * bring the current player's edge to the front — which is what makes a shared
- * screen say "your go" without a label. Phones never rotate: your own view of
- * the table should not swing around under you between turns.
+ * Two things happen here. A board that turns is tilted away from the viewer so
+ * it reads as a physical surface rather than a diagram, and on the TV it
+ * *turns* to bring the current player's edge to the front — which is what
+ * makes a shared screen say "your go" without a label. Phones never rotate:
+ * your own view of the table should not swing around under you between turns.
+ * A board with `rotate` off is drawn flat instead, at full size.
  *
  * While the dice are in the air the camera lifts and pulls back to take in the
  * whole board, then settles again — the roll gets its own moment instead of
@@ -98,10 +99,14 @@ export function TableStage({
 }) {
   const { options, povSeat, beats } = useTable();
   const rolling = beats.current?.kind === 'dice';
+  // A board that never turns gains nothing from being laid back: the tilt only
+  // foreshortens it and costs it size on screen. The tilt earns its keep by
+  // selling the *turn*, so boards that don't turn come flat to the front.
+  const laid = rotate ? (rolling ? Math.max(0, tilt - 20) : tilt) : 0;
   return (
     <BoardStage
       enabled={options.perspective}
-      tilt={rolling ? Math.max(0, tilt - 20) : tilt}
+      tilt={laid}
       spin={rotate ? povSpin(povSeat, sides) : 0}
       zoom={rolling ? 0.88 : 1}
     >
