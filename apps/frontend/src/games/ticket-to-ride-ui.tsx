@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { GameSummary } from '@gamebox/shared-types';
 import type { TtrPublic, TtrMove, Card, TicketView, TrainColor, TtrMapDef } from '@gamebox/game-ticket-to-ride';
 import { MAPS } from '@gamebox/game-ticket-to-ride';
@@ -18,28 +18,129 @@ const CARD_HEX: Record<string, string> = {
 };
 const ROUTE_HEX: Record<string, string> = { ...CARD_HEX, gray: '#8a90b0' };
 const DARK_TEXT = new Set(['yellow', 'white']);
+/** The colour a route you have marked to build is drawn in. */
+const PLAN_HEX = '#ffcc55';
 
 const NICE = (c: string) => c.split('-').map((w) => (w === 'st' ? 'St' : w[0]!.toUpperCase() + w.slice(1))).join(' ');
 
-const S = 10;
+const VB_W = 1000;
+const VB_H = 620;
+/** Board margin. Bigger at the top because city labels sit above their dot. */
+const PAD = { x: 30, top: 40, bottom: 24 };
+/**
+ * How far the two axes may drift apart when a map is stretched to fill the
+ * board. A little is invisible and buys a noticeably bigger map; a lot would
+ * make a continent look squashed.
+ */
+const MAX_ANISO = 1.3;
+
+type CityPos = (city: string) => readonly [number, number];
+
+const layouts = new WeakMap<TtrMapDef, CityPos>();
+
+/**
+ * Places a map's cities on the board.
+ *
+ * Each map is authored in an abstract coordinate space that is larger than the
+ * ground its cities actually cover, so scaling it by a fixed factor left the
+ * continent adrift in the middle of the board with dead margins all round.
+ * This measures the span the cities really occupy and stretches *that* to the
+ * edges, so the tracks use the space they are given.
+ */
+function cityPosOf(mapDef: TtrMapDef): CityPos {
+  const cached = layouts.get(mapDef);
+  if (cached) return cached;
+  const pts = Object.values(mapDef.cityPos);
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const spanX = Math.max(...xs) - minX || 1;
+  const spanY = Math.max(...ys) - minY || 1;
+  const availW = VB_W - PAD.x * 2;
+  const availH = VB_H - PAD.top - PAD.bottom;
+  let sx = availW / spanX;
+  let sy = availH / spanY;
+  const cap = Math.min(sx, sy) * MAX_ANISO;
+  sx = Math.min(sx, cap);
+  sy = Math.min(sy, cap);
+  const ox = PAD.x + (availW - spanX * sx) / 2;
+  const oy = PAD.top + (availH - spanY * sy) / 2;
+  const fn: CityPos = (city) => {
+    const p = mapDef.cityPos[city]!;
+    return [ox + (p[0] - minX) * sx, oy + (p[1] - minY) * sy] as const;
+  };
+  layouts.set(mapDef, fn);
+  return fn;
+}
 
 function mapDefOf(view: TtrView): TtrMapDef {
   return MAPS[view.map] ?? MAPS['north-america']!;
 }
 
+/**
+ * The cheapest chain of routes from `a` to `b`: what you would still have to
+ * lay to join those two cities. Routes somebody else owns are impassable and
+ * routes you already own are free, which makes this a useful answer to "how
+ * far off is this ticket?" rather than just a distance.
+ */
+function planRoute(
+  mapDef: TtrMapDef,
+  claimed: Record<string, number>,
+  mine: number | null,
+  a: string,
+  b: string,
+): string[] {
+  if (a === b) return [];
+  const dist = new Map<string, number>([[a, 0]]);
+  const prev = new Map<string, { city: string; route: string }>();
+  const settled = new Set<string>();
+  for (;;) {
+    let cur: string | null = null;
+    let curD = Infinity;
+    for (const [c, d] of dist) if (!settled.has(c) && d < curD) { cur = c; curD = d; }
+    if (cur === null || cur === b) break;
+    settled.add(cur);
+    for (const rt of mapDef.routes) {
+      if (rt.a !== cur && rt.b !== cur) continue;
+      const owner = claimed[rt.id];
+      if (owner !== undefined && owner !== mine) continue;
+      const next = rt.a === cur ? rt.b : rt.a;
+      const step = curD + (owner === undefined ? rt.length : 0);
+      if (step < (dist.get(next) ?? Infinity)) {
+        dist.set(next, step);
+        prev.set(next, { city: cur, route: rt.id });
+      }
+    }
+  }
+  const out: string[] = [];
+  let c = b;
+  while (c !== a) {
+    const p = prev.get(c);
+    if (!p) return [];
+    out.push(p.route);
+    c = p.city;
+  }
+  return out.reverse();
+}
+
 /** Route drawn as `length` little train-car segments along the city-to-city line. */
-function RouteSegments({ mapDef, summary, id, owner, highlight, onClick }: {
+function RouteSegments({ mapDef, pos, summary, id, owner, highlight, planned, faded, onClick }: {
   mapDef: TtrMapDef;
+  pos: CityPos;
   summary: GameSummary;
   id: string;
   owner: number | undefined;
   highlight?: boolean;
+  /** Marked by this player as a track they mean to build. */
+  planned?: boolean;
+  /** Pushed to the back so something else can be read over it. */
+  faded?: boolean;
   onClick?: () => void;
 }) {
   const def = mapDef.routeById[id]!;
-  const [ax, ay] = mapDef.cityPos[def.a]!;
-  const [bx, by] = mapDef.cityPos[def.b]!;
-  const x1 = ax * S, y1 = ay * S, x2 = bx * S, y2 = by * S;
+  const [x1, y1] = pos(def.a);
+  const [x2, y2] = pos(def.b);
   const dx = x2 - x1, dy = y2 - y1;
   const dist = Math.hypot(dx, dy);
   const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
@@ -53,9 +154,13 @@ function RouteSegments({ mapDef, summary, id, owner, highlight, onClick }: {
     return [x1 + dx * t, y1 + dy * t] as const;
   });
   return (
-    <g onClick={onClick} style={onClick ? { cursor: 'pointer' } : undefined}>
+    <g onClick={onClick} style={onClick ? { cursor: 'pointer' } : undefined} opacity={faded ? 0.16 : 1}>
       {/* fat invisible hit line for easy tapping */}
       <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={16} />
+      {planned && owner === undefined && (
+        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={PLAN_HEX} strokeWidth={15} strokeLinecap="round"
+          strokeDasharray="10 7" opacity={0.55} />
+      )}
       {highlight && (
         <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="rgba(46,230,201,0.35)" strokeWidth={13} strokeLinecap="round">
           <animate attributeName="stroke-opacity" values="0.25;0.7;0.25" dur="1.4s" repeatCount="indefinite" />
@@ -75,13 +180,21 @@ function RouteSegments({ mapDef, summary, id, owner, highlight, onClick }: {
   );
 }
 
-function TtrMap({ view, summary, claimable, onRoute }: {
+function TtrMap({ view, summary, claimable, onRoute, planned, deed }: {
   view: TtrView;
   summary: GameSummary;
   claimable?: Set<string>;
   onRoute?: (id: string) => void;
+  /** Routes this player has marked as ones they mean to build. */
+  planned?: Set<string>;
+  /**
+   * Ticket-card mode: everything but the two cities and the suggested chain
+   * between them recedes, so the map reads as the picture on the ticket.
+   */
+  deed?: { a: string; b: string; path: Set<string> };
 }) {
   const mapDef = mapDefOf(view);
+  const pos = cityPosOf(mapDef);
   const fit = useBoardFit();
 
   // pop + pulse a route the moment it gets claimed (skip initial mount)
@@ -94,8 +207,12 @@ function TtrMap({ view, summary, claimable, onRoute }: {
     for (const id of Object.keys(view.claimed)) seenClaimed.current!.add(id);
   }, [view.claimed]);
 
+  const deedCities = deed
+    ? new Set([deed.a, deed.b, ...[...deed.path].flatMap((id) => [mapDef.routeById[id]!.a, mapDef.routeById[id]!.b])])
+    : null;
+
   return (
-    <svg viewBox="0 0 1000 620" preserveAspectRatio={fit}
+    <svg viewBox={`0 0 ${VB_W} ${VB_H}`} preserveAspectRatio={fit}
       style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}>
       <FxDefs />
       <defs>
@@ -104,38 +221,56 @@ function TtrMap({ view, summary, claimable, onRoute }: {
           <stop offset="100%" stopColor="#0b102c" />
         </radialGradient>
       </defs>
-      <rect width={1000} height={620} rx={16} fill="url(#ttr-bg)" />
+      <rect width={VB_W} height={VB_H} rx={16} fill="url(#ttr-bg)" />
       {mapDef.routes.map((r) => (
         <g key={r.id} className={isFresh(r.id) && view.claimed[r.id] !== undefined ? 'gb-pop' : undefined}>
           <RouteSegments
             mapDef={mapDef}
+            pos={pos}
             summary={summary}
             id={r.id}
             owner={view.claimed[r.id]}
-            highlight={claimable?.has(r.id)}
-            onClick={onRoute && claimable?.has(r.id) ? () => onRoute(r.id) : undefined}
+            highlight={deed ? deed.path.has(r.id) : claimable?.has(r.id)}
+            planned={!deed && planned?.has(r.id)}
+            faded={!!deed && !deed.path.has(r.id)}
+            onClick={onRoute ? () => onRoute(r.id) : undefined}
           />
         </g>
       ))}
       {freshIds.map((id) => {
         const def = mapDef.routeById[id]!;
-        const [ax, ay] = mapDef.cityPos[def.a]!;
-        const [bx, by] = mapDef.cityPos[def.b]!;
+        const [ax, ay] = pos(def.a);
+        const [bx, by] = pos(def.b);
         return (
-          <RebirthPulse key={`fx-${id}`} x={((ax + bx) / 2) * S} y={((ay + by) / 2) * S}
+          <RebirthPulse key={`fx-${id}`} x={(ax + bx) / 2} y={(ay + by) / 2}
             color={seatColor(summary, view.claimed[id]!)} r={26} />
         );
       })}
-      {Object.entries(mapDef.cityPos).map(([c, [x, y]]) => (
-        <g key={c}>
-          <circle cx={x * S} cy={y * S} r={7.5} fill="#f2e6c8" stroke="#0a0e24" strokeWidth={2.5} />
-          <circle cx={x * S - 2} cy={y * S - 2} r={2.2} fill="rgba(255,255,255,0.7)" />
-          <text x={x * S} y={y * S - 12} textAnchor="middle" fontSize={14.5} fontWeight={800}
-            fill="#e7ebff" stroke="#0a0e24" strokeWidth={3.5} style={{ paintOrder: 'stroke' }}>
-            {NICE(c)}
-          </text>
-        </g>
-      ))}
+      {Object.keys(mapDef.cityPos).map((c) => {
+        const [x, y] = pos(c);
+        const endpoint = deed ? c === deed.a || c === deed.b : false;
+        const shown = !deed || deedCities!.has(c);
+        return (
+          <g key={c} opacity={shown ? 1 : 0.18}>
+            {endpoint && (
+              <circle cx={x} cy={y} r={16} fill="none" stroke={PLAN_HEX} strokeWidth={3}>
+                <animate attributeName="r" values="14;20;14" dur="1.8s" repeatCount="indefinite" />
+              </circle>
+            )}
+            <circle cx={x} cy={y} r={endpoint ? 9.5 : 7.5} fill={endpoint ? PLAN_HEX : '#f2e6c8'}
+              stroke="#0a0e24" strokeWidth={2.5} />
+            <circle cx={x - 2} cy={y - 2} r={2.2} fill="rgba(255,255,255,0.7)" />
+            {shown && (
+              <text x={x} y={y - (endpoint ? 16 : 12)} textAnchor="middle"
+                fontSize={endpoint ? 19 : 14.5} fontWeight={800}
+                fill={endpoint ? PLAN_HEX : '#e7ebff'} stroke="#0a0e24" strokeWidth={3.5}
+                style={{ paintOrder: 'stroke' }}>
+                {NICE(c)}
+              </text>
+            )}
+          </g>
+        );
+      })}
     </svg>
   );
 }
@@ -267,6 +402,8 @@ function TvView({ state }: TvViewProps<TtrView>) {
       <Market view={view} canAct={false} />
       <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: '2vmin' }}>
         <div className="tv-board">
+          {/* The map never turns between players, so TableStage brings it flat
+              to the front at full size rather than tilting it into the table. */}
           <TableStage sides={4} tilt={26} rotate={false}>
             <TtrMap view={view} summary={state.summary} />
           </TableStage>
@@ -283,14 +420,93 @@ function TvView({ state }: TvViewProps<TtrView>) {
   );
 }
 
-function TicketRow({ t, done }: { t: { a: string; b: string; points: number }; done?: boolean }) {
+function TicketRow({ t, done, onClick }: {
+  t: { a: string; b: string; points: number };
+  done?: boolean;
+  onClick?: () => void;
+}) {
   return (
-    <div className="row between" style={{ opacity: done === undefined ? 1 : done ? 1 : 0.75 }}>
+    <div className="row between" onClick={onClick}
+      style={{ opacity: done === undefined ? 1 : done ? 1 : 0.75, cursor: onClick ? 'pointer' : undefined }}>
       <span>
         {done !== undefined && <span style={{ color: done ? 'var(--accent-2)' : 'var(--text-dim)' }}>{done ? '✓ ' : '○ '}</span>}
         {NICE(t.a)} → {NICE(t.b)}
       </span>
-      <span className={`badge ${done ? 'on' : ''}`}>{t.points}</span>
+      <span className="row" style={{ gap: 6 }}>
+        {onClick && <span className="dim small">🔍 map</span>}
+        <span className={`badge ${done ? 'on' : ''}`}>{t.points}</span>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * The tracks this player has marked as ones they mean to build.
+ *
+ * Kept on the phone rather than the server: it is a private intention, nobody
+ * else's business, and it should survive a reload of your own screen.
+ */
+function usePlan(gameId: string, seat: number) {
+  const key = `ttr-plan:${gameId}:${seat}`;
+  const [plan, setPlan] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+      return Array.isArray(parsed) ? (parsed as string[]) : [];
+    } catch { return []; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(key, JSON.stringify(plan)); } catch { /* storage may be off */ }
+  }, [key, plan]);
+  const toggle = (id: string) => setPlan((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  const add = (ids: string[]) => setPlan((p) => [...p, ...ids.filter((id) => !p.includes(id))]);
+  return { plan, setPlan, toggle, add };
+}
+
+/**
+ * A destination ticket, opened up: the two cities on the map with a suggested
+ * chain of track between them — the same thing you get by holding the physical
+ * ticket up against the board.
+ */
+function TicketDeed({ ticket, view, summary, seat, onClose, onPlan, planned }: {
+  ticket: { a: string; b: string; points: number };
+  view: TtrView;
+  summary: GameSummary;
+  seat: number;
+  onClose: () => void;
+  onPlan: (ids: string[]) => void;
+  planned: Set<string>;
+}) {
+  const mapDef = mapDefOf(view);
+  const path = planRoute(mapDef, view.claimed, seat, ticket.a, ticket.b);
+  const todo = path.filter((id) => view.claimed[id] === undefined);
+  const trains = todo.reduce((n, id) => n + mapDef.routeById[id]!.length, 0);
+  const allPlanned = todo.length > 0 && todo.every((id) => planned.has(id));
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+        <h3 style={{ margin: 0 }}>{NICE(ticket.a)} → {NICE(ticket.b)}</h3>
+        <div className="row between">
+          <span className="dim small">
+            {path.length === 0
+              ? 'No way through — those cities are cut off'
+              : todo.length === 0
+                ? 'Connected — this ticket is done'
+                : `Shortest way left: ${todo.length} route${todo.length === 1 ? '' : 's'}, ${trains} 🚃`}
+          </span>
+          <span className="badge on">{ticket.points}</span>
+        </div>
+        <div className="board-frame" style={{ aspectRatio: `${VB_W} / ${VB_H}` }}>
+          <TtrMap view={view} summary={summary} deed={{ a: ticket.a, b: ticket.b, path: new Set(path) }} />
+        </div>
+        {todo.length > 0 && (
+          <button className={allPlanned ? 'ghost' : 'secondary'} disabled={allPlanned}
+            onClick={() => { onPlan(todo); onClose(); }}>
+            {allPlanned ? '★ Already in your plan' : '★ Add these tracks to my plan'}
+          </button>
+        )}
+        <button className="ghost" onClick={onClose}>Close</button>
+      </div>
     </div>
   );
 }
@@ -300,6 +516,9 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<TtrView, Tt
   const [keep, setKeep] = useState<number[]>([]);
   const [colorPick, setColorPick] = useState<{ route: string; colors: TrainColor[] } | null>(null);
   const [showMap, setShowMap] = useState(false);
+  const [planMode, setPlanMode] = useState(false);
+  const [deed, setDeed] = useState<{ a: string; b: string; points: number } | null>(null);
+  const { plan, setPlan, toggle: togglePlan, add: addToPlan } = usePlan(state.summary.id, yourSeat);
   if (!view) return null;
   const mapDef = mapDefOf(view);
   const legal = (state.legalMoves ?? []) as TtrMove[];
@@ -316,6 +535,7 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<TtrView, Tt
   const canBlind = legal.some((m) => m.kind === 'DRAW_BLIND');
   const canTickets = legal.some((m) => m.kind === 'DRAW_TICKETS');
   const actionable = myTurn && !choosingTickets && view.phase === 'PLAY';
+  const plannedSet = new Set(plan);
 
   const onRoute = (id: string) => {
     const options = claimMoves.filter((m) => m.route === id);
@@ -324,8 +544,36 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<TtrView, Tt
     else submitMove('CLAIM_ROUTE', { route: id, color: colors[0] });
   };
 
+  // A tap on the map either claims the route or marks it for later, never
+  // both — so marking out a plan can never cost you trains by accident.
+  const onMapRoute = (id: string) => {
+    if (planMode) {
+      if (view.claimed[id] === undefined) togglePlan(id);
+      return;
+    }
+    if (actionable && claimable.has(id)) onRoute(id);
+  };
+
   const handCounts = new Map<Card, number>();
   for (const c of view.hand ?? []) handCounts.set(c, (handCounts.get(c) ?? 0) + 1);
+  const locos = handCounts.get('loco') ?? 0;
+
+  /** How many more cards you need before a route becomes payable. */
+  const shortBy = (id: string) => {
+    const def = mapDef.routeById[id]!;
+    const best = def.color === 'gray'
+      ? Math.max(0, ...Object.keys(CARD_HEX).map((c) => handCounts.get(c as Card) ?? 0))
+      : handCounts.get(def.color as Card) ?? 0;
+    return Math.max(0, def.length - best - locos);
+  };
+
+  // Routes you can afford right now, with the ones you planned pushed to the
+  // top — that is the whole point of having planned them.
+  const claimList = [...claimable].sort((a, b) => {
+    const pa = plan.indexOf(a), pb = plan.indexOf(b);
+    if (pa !== pb) return (pa < 0 ? Number.MAX_SAFE_INTEGER : pa) - (pb < 0 ? Number.MAX_SAFE_INTEGER : pb);
+    return mapDef.routeById[b]!.length - mapDef.routeById[a]!.length;
+  });
 
   return (
     <div className="page wide">
@@ -351,15 +599,20 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<TtrView, Tt
             <Prompt>Pick your destination tickets — keep at least {minKeep}</Prompt>
             {offer!.map((t, i) => (
               <div key={i}
-                onClick={() => setKeep((k) => (k.includes(i) ? k.filter((x) => x !== i) : [...k, i]))}
                 className="row between"
                 style={{
-                  padding: '0.5em 0.8em', borderRadius: 12, cursor: 'pointer',
+                  padding: '0.5em 0.8em', borderRadius: 12,
                   background: keep.includes(i) ? 'rgba(46,230,201,0.15)' : 'var(--bg-raised)',
                   border: keep.includes(i) ? '1.5px solid var(--accent-2)' : '1.5px solid transparent',
                 }}>
-                <span>{keep.includes(i) ? '☑' : '☐'} {NICE(t.a)} → {NICE(t.b)}</span>
-                <span className="badge">{t.points}</span>
+                <span style={{ cursor: 'pointer', flex: 1 }}
+                  onClick={() => setKeep((k) => (k.includes(i) ? k.filter((x) => x !== i) : [...k, i]))}>
+                  {keep.includes(i) ? '☑' : '☐'} {NICE(t.a)} → {NICE(t.b)}
+                </span>
+                <span className="row" style={{ gap: 6 }}>
+                  <button className="ghost" style={{ padding: '0.2em 0.5em' }} onClick={() => setDeed(t)}>🔍</button>
+                  <span className="badge">{t.points}</span>
+                </span>
               </div>
             ))}
             <button disabled={keep.length < minKeep}
@@ -402,10 +655,10 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<TtrView, Tt
       </div>
 
       {/* routes you can afford, as tappable rows — the map lives on the TV */}
-      {actionable && claimable.size > 0 && (
+      {actionable && claimList.length > 0 && (
         <div className="card">
           <h3>Routes you can claim</h3>
-          {[...claimable].map((id) => {
+          {claimList.map((id) => {
             const def = mapDef.routeById[id]!;
             return (
               <button key={id} className="secondary" style={{ width: '100%', textAlign: 'left' }}
@@ -414,6 +667,7 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<TtrView, Tt
                   display: 'inline-block', width: 12, height: 12, borderRadius: 3, marginRight: 8,
                   background: ROUTE_HEX[def.color], border: '1px solid rgba(0,0,0,0.4)', verticalAlign: -1,
                 }} />
+                {plannedSet.has(id) && <span style={{ color: PLAN_HEX }}>★ </span>}
                 {NICE(def.a)} → {NICE(def.b)} · {def.length} 🚃
               </button>
             );
@@ -421,12 +675,55 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<TtrView, Tt
         </div>
       )}
 
-      <button className="ghost" onClick={() => setShowMap((s) => !s)}>
-        {showMap ? 'Hide map' : 'Show map'}
-      </button>
+      {plan.length > 0 && state.status !== 'completed' && (
+        <div className="card">
+          <div className="row between">
+            <h3 style={{ margin: 0 }}>★ Your plan</h3>
+            <button className="ghost" style={{ padding: '0.2em 0.6em' }} onClick={() => setPlan([])}>clear</button>
+          </div>
+          {plan.map((id) => {
+            const def = mapDef.routeById[id];
+            if (!def) return null;
+            const owner = view.claimed[id];
+            const short = shortBy(id);
+            const note = owner === yourSeat ? '✓ built'
+              : owner !== undefined ? `taken by ${seatName(state.summary, owner)}`
+                : claimable.has(id) ? 'ready now'
+                  : short > 0 ? `need ${short} more` : `${def.length} 🚃`;
+            return (
+              <div key={id} className="row between"
+                style={{ opacity: owner !== undefined && owner !== yourSeat ? 0.5 : 1 }}>
+                <span>
+                  <span style={{
+                    display: 'inline-block', width: 12, height: 12, borderRadius: 3, marginRight: 8,
+                    background: ROUTE_HEX[def.color], border: '1px solid rgba(0,0,0,0.4)', verticalAlign: -1,
+                  }} />
+                  {NICE(def.a)} → {NICE(def.b)}
+                </span>
+                <span className="row" style={{ gap: 8 }}>
+                  <span className={`badge ${claimable.has(id) ? 'on' : ''}`}>{note}</span>
+                  <button className="ghost" style={{ padding: '0.2em 0.5em' }} onClick={() => togglePlan(id)}>✕</button>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="action-bar">
+        <button className="ghost" onClick={() => setShowMap((s) => !s)}>
+          {showMap ? 'Hide map' : 'Show map'}
+        </button>
+        {showMap && (
+          <button className={planMode ? 'secondary' : 'ghost'} onClick={() => setPlanMode((p) => !p)}>
+            {planMode ? '★ Planning — tap tracks to mark' : '★ Plan tracks'}
+          </button>
+        )}
+      </div>
       {showMap && (
         <div className="board-frame">
-          <TtrMap view={view} summary={state.summary} claimable={actionable ? claimable : undefined} onRoute={onRoute} />
+          <TtrMap view={view} summary={state.summary} planned={plannedSet}
+            claimable={actionable && !planMode ? claimable : undefined} onRoute={onMapRoute} />
         </div>
       )}
 
@@ -446,8 +743,14 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<TtrView, Tt
       {view.tickets && view.tickets.length > 0 && (
         <div className="card">
           <h3>Your tickets</h3>
-          {view.tickets.map((t, i) => <TicketRow key={i} t={t} done={t.completed} />)}
+          <p className="dim small" style={{ marginTop: 0 }}>Tap a ticket to see it on the map.</p>
+          {view.tickets.map((t, i) => <TicketRow key={i} t={t} done={t.completed} onClick={() => setDeed(t)} />)}
         </div>
+      )}
+
+      {deed && (
+        <TicketDeed ticket={deed} view={view} summary={state.summary} seat={yourSeat}
+          planned={plannedSet} onPlan={addToPlan} onClose={() => setDeed(null)} />
       )}
 
       {colorPick && (
