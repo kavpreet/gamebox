@@ -28,6 +28,11 @@ const full = (line: number[], ok: Ok) => line.every(ok);
 const countFull = (lines: number[][], ok: Ok) => lines.filter((l) => full(l, ok)).length;
 const allLines75 = (c: Card) => [...rows75(c), ...cols75(c), ...diags75(c)];
 
+/** Full lines (rows, columns, diagonals) on a 75-ball card — 12 possible. */
+export function countLines75(card: Card, ok: Ok): number {
+  return countFull(allLines75(card), ok);
+}
+
 // ── 90-ball helpers (3×9, blanks null) ───────────────────────────────────────
 const rows90 = (c: Card) => c.cells.map((r) => r.filter((n): n is number => n !== null));
 const corners90 = (c: Card) => {
@@ -49,6 +54,12 @@ export const PRIZES: PrizeDef[] = [
     check: (c, ok) => full([c.cells[0]![0], c.cells[0]![4], c.cells[4]![0], c.cells[4]![4]] as number[], ok) },
   { id: 'lines2', name: '2 Lines', description: 'Any two full lines (rows, columns or diagonals)', balls: 75, defaultPoints: 20,
     check: (c, ok) => countFull(allLines75(c), ok) >= 2 },
+  { id: 'lines3', name: '3 Lines', description: 'Any three full lines', balls: 75, defaultPoints: 30,
+    check: (c, ok) => countFull(allLines75(c), ok) >= 3 },
+  { id: 'lines4', name: '4 Lines', description: 'Any four full lines', balls: 75, defaultPoints: 40,
+    check: (c, ok) => countFull(allLines75(c), ok) >= 4 },
+  { id: 'lines5', name: '5 Lines — B·I·N·G·O', description: 'Five full lines, one per letter of BINGO', balls: 75, defaultPoints: 50,
+    check: (c, ok) => countFull(allLines75(c), ok) >= 5 },
   { id: 'row2', name: '2 Rows', description: 'Any two full horizontal rows', balls: 75, defaultPoints: 20,
     check: (c, ok) => countFull(rows75(c), ok) >= 2 },
   { id: 'row3', name: '3 Rows', description: 'Any three full horizontal rows', balls: 75, defaultPoints: 30,
@@ -96,6 +107,8 @@ export interface PrizePreset {
 export const PRESETS: PrizePreset[] = [
   { name: 'Classic', balls: 75, prizes: ['line', 'blackout'] },
   { name: 'Party', balls: 75, prizes: ['line', 'corners75', 'x', 'blackout'] },
+  { name: '5 Lines (B·I·N·G·O)', balls: 75, prizes: ['lines5'] },
+  { name: 'Lines ladder', balls: 75, prizes: ['line', 'lines2', 'lines3', 'lines4', 'lines5'] },
   { name: 'Rows ladder', balls: 75, prizes: ['row1', 'row2', 'row3', 'blackout'] },
   { name: 'UK 90-ball', balls: 90, prizes: ['oneLine', 'twoLines', 'house'] },
   { name: 'Tambola', balls: 90, prizes: ['early5', 'top', 'middle', 'bottom', 'corners90', 'house'] },

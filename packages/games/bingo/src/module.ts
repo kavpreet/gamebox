@@ -6,8 +6,9 @@ import { PRESETS, PRIZE_BY_ID } from './prizes.js';
 /**
  * Bingo — 75-ball (5×5, free centre) or 90-ball (tambola tickets), with a
  * configurable list of prizes. The host (seat 0) picks the setup in-game,
- * then numbers are drawn either automatically on a timer or round-robin by
- * each player in turn.
+ * then numbers are drawn automatically on a timer, round-robin by each
+ * player in turn, or — in combat mode — each player in turn CHOOSES the next
+ * number, trying to help their own card and starve everyone else's.
  *
  * Marking is honour-system: players may dab ANY number on their card, called
  * or not. Claims are verified — a prize is awarded only if its pattern is
@@ -22,7 +23,7 @@ import { PRESETS, PRIZE_BY_ID } from './prizes.js';
  * drawn, so two players completing on the same ball split its points.
  */
 
-export type CallMode = 'auto' | 'roundRobin';
+export type CallMode = 'auto' | 'roundRobin' | 'combat';
 
 export interface BingoConfig {
   balls: 75 | 90;
@@ -54,7 +55,7 @@ export interface BingoPublic {
   order: Seat[];
   config: BingoConfig;
   calls: number[];
-  caller: Seat | null; // round-robin: whose turn to draw
+  caller: Seat | null; // round-robin / combat: whose turn to call
   nextCallAt: number | null; // auto: epoch ms
   lastCallAt: number;
   autoPaused: boolean;
@@ -78,7 +79,7 @@ interface Hidden {
 export type BingoMove =
   | { kind: 'CONFIGURE'; config: BingoConfig }
   | { kind: 'START' }
-  | { kind: 'DRAW'; at: number }
+  | { kind: 'DRAW'; at: number; n?: number } // n: the chosen number (combat only)
   | { kind: 'MARK'; card: number; n: number }
   | { kind: 'CLAIM'; prize: string; card: number }
   | { kind: 'PAUSE' }
@@ -132,7 +133,9 @@ export function defaultConfig(balls: 75 | 90 = 75): BingoConfig {
 function validateConfig(raw: unknown): BingoConfig {
   const c = raw as Partial<BingoConfig> | null;
   if (!c || (c.balls !== 75 && c.balls !== 90)) throw new IllegalMove('Pick 75 or 90 balls');
-  if (c.callMode !== 'auto' && c.callMode !== 'roundRobin') throw new IllegalMove('Pick a calling mode');
+  if (c.callMode !== 'auto' && c.callMode !== 'roundRobin' && c.callMode !== 'combat') {
+    throw new IllegalMove('Pick a calling mode');
+  }
   const intInRange = (v: unknown, lo: number, hi: number, what: string) => {
     const n = Number(v);
     if (!Number.isInteger(n) || n < lo || n > hi) throw new IllegalMove(`${what} must be ${lo}–${hi}`);
@@ -194,21 +197,40 @@ function allPrizesGone(pub: BingoPublic): boolean {
   return pub.prizes.every((p) => p.wonAtCall !== null);
 }
 
-function drawBall(s: State): void {
+/** Turn-based calling (a designated caller), as opposed to the auto timer. */
+export function turnBased(mode: CallMode): boolean {
+  return mode === 'roundRobin' || mode === 'combat';
+}
+
+/** Draw the next ball — random from the bag, or `chosen` in combat mode. */
+function drawBall(s: State, seat: Seat, chosen?: number): void {
   const pub = s.public;
   const bag = hidden(s).bag;
   if (allPrizesGone(pub)) {
     finish(pub, 'All prizes won — game over!');
     return;
   }
-  const n = bag.pop();
-  if (n === undefined) {
+  if (bag.length === 0) {
     finish(pub, 'Out of balls — game over!');
     return;
   }
+  let n: number;
+  if (chosen !== undefined) {
+    const i = bag.indexOf(chosen);
+    if (i === -1) {
+      throw new IllegalMove(
+        chosen >= 1 && chosen <= pub.config.balls ? `${chosen} has already been called` : `Pick a number 1–${pub.config.balls}`,
+      );
+    }
+    bag.splice(i, 1);
+    n = chosen;
+  } else {
+    n = bag.pop()!;
+  }
   pub.calls.push(n);
   pub.lastCallAt = now();
-  log(pub, 'call', ballLabel(pub.config.balls, n));
+  if (pub.config.callMode === 'combat') log(pub, 'call', `called ${ballLabel(pub.config.balls, n)}`, seat);
+  else log(pub, 'call', ballLabel(pub.config.balls, n));
   if (pub.config.callMode === 'auto') {
     pub.nextCallAt = pub.lastCallAt + pub.config.intervalSec * 1000;
   } else {
@@ -320,7 +342,12 @@ export const bingo: GameModule<BingoPublic, PlayerCards | Hidden, BingoMove> = {
       } else if (seat !== pub.caller && now() - pub.lastCallAt < CALLER_STALL_MS) {
         throw new IllegalMove("It's not your turn to call");
       }
-      drawBall(s);
+      let chosen: number | undefined;
+      if (pub.config.callMode === 'combat' && !allPrizesGone(pub) && hidden(s).bag.length > 0) {
+        chosen = Number((payload as { n?: number }).n);
+        if (!Number.isInteger(chosen)) throw new IllegalMove('Choose a number to call');
+      }
+      drawBall(s, seat, chosen);
     },
 
     MARK({ state, seat, payload }) {
@@ -442,7 +469,7 @@ export const bingo: GameModule<BingoPublic, PlayerCards | Hidden, BingoMove> = {
 
   onPlayerSkipped(state, seat) {
     const pub = (state as State).public;
-    if (pub.phase === 'playing' && pub.config.callMode === 'roundRobin' && pub.caller === seat) {
+    if (pub.phase === 'playing' && turnBased(pub.config.callMode) && pub.caller === seat) {
       pub.caller = nextInOrder(pub, seat);
       pub.lastCallAt = now();
     }
@@ -461,7 +488,7 @@ export const bingo: GameModule<BingoPublic, PlayerCards | Hidden, BingoMove> = {
       return;
     }
     pub.caller = nextCaller === seat ? null : nextCaller;
-    if (pub.phase === 'playing' && pub.config.callMode === 'roundRobin' && pub.caller === null) {
+    if (pub.phase === 'playing' && turnBased(pub.config.callMode) && pub.caller === null) {
       pub.caller = pub.order[0]!;
     }
     recomputeScores(pub);

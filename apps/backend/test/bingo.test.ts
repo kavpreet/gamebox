@@ -159,6 +159,46 @@ describe('bingo calling', () => {
     expect(pub(rt).caller).toBe(0);
   });
 
+  it('combat: the caller chooses each number; turns rotate; picks are validated', () => {
+    const rt = startGame({ callMode: 'combat', prizes: [{ id: 'row1', points: 10 }] });
+    expect(pub(rt).caller).toBe(0);
+    expect(() => rt.applyMove(1, 'DRAW', { at: 0, n: 5 })).toThrow(/not your turn/);
+    expect(() => rt.applyMove(0, 'DRAW', { at: 0 })).toThrow(/Choose a number/);
+    expect(() => rt.applyMove(0, 'DRAW', { at: 0, n: 76 })).toThrow(/1–75/);
+    rt.applyMove(0, 'DRAW', { at: 0, n: 7 });
+    expect(pub(rt).calls).toEqual([7]);
+    expect(pub(rt).caller).toBe(1);
+    expect(() => rt.applyMove(1, 'DRAW', { at: 1, n: 7 })).toThrow(/already been called/);
+    expect(pub(rt).log.at(-1)).toMatchObject({ kind: 'call', seat: 0, text: 'called B 7' });
+
+    // seat 1 completes their own top row by calling its numbers whenever it's their turn
+    const target = (card(rt, 1).cells[0] as number[]).filter((n) => n !== FREE && n !== 7);
+    let pick = 0;
+    while (!target.every((n) => pub(rt).calls.includes(n))) {
+      const p = pub(rt);
+      const free = (n: number) => !p.calls.includes(n);
+      const n = p.caller === 1
+        ? target.find(free)!
+        : Array.from({ length: 75 }, (_, i) => i + 1).find((x) => free(x) && !target.includes(x))!;
+      rt.applyMove(p.caller!, 'DRAW', { at: p.calls.length, n });
+      if (++pick > 40) throw new Error('loop');
+    }
+    markAll(rt, 1, card(rt, 1).cells[0] as number[]);
+    rt.applyMove(1, 'CLAIM', { prize: 'row1', card: 0 });
+    expect(pub(rt).scores[1]).toBe(10);
+    // all prizes gone → the next call ends the game without needing a number
+    rt.applyMove(pub(rt).caller!, 'DRAW', { at: pub(rt).calls.length });
+    expect(rt.currentStatus).toBe('completed');
+  });
+
+  it('combat: every number can be called once, then the game ends', () => {
+    const rt = startGame({ callMode: 'combat' });
+    for (let n = 75; n >= 1; n--) rt.applyMove(pub(rt).caller!, 'DRAW', { at: 75 - n, n });
+    expect(new Set(pub(rt).calls).size).toBe(75);
+    rt.applyMove(pub(rt).caller!, 'DRAW', { at: 75 });
+    expect(rt.currentStatus).toBe('completed');
+  });
+
   it('runs out of balls and ends the game', () => {
     const rt = startGame({ callMode: 'roundRobin', balls: 90 });
     drawUntil(rt, (c) => c.length === 90);
@@ -244,6 +284,29 @@ describe('bingo claims', () => {
     rt.applyMove(p.caller!, 'DRAW', { at: p.calls.length });
     expect(rt.currentStatus).toBe('completed');
     expect(rt.endResult!.winners).toEqual([first]);
+  });
+
+  it('5 lines (B-I-N-G-O): four lines is a bogey, five lines wins', () => {
+    const rt = startGame({ callMode: 'combat', prizes: [{ id: 'lines5', points: 50 }] });
+    const c = card(rt, 0).cells as number[][];
+    const rows = [0, 1, 2, 3].map((r) => c[r]!.filter((n) => n !== FREE));
+    const col4 = c.map((r) => r[4]!);
+    const callAll = (nums: number[]) => {
+      for (const n of nums) {
+        if (pub(rt).calls.includes(n)) continue;
+        // every seat "helps" seat 0 here — we only care about pattern checking
+        rt.applyMove(pub(rt).caller!, 'DRAW', { at: pub(rt).calls.length, n });
+      }
+    };
+    callAll(rows.flat());
+    markAll(rt, 0, rows.flat());
+    rt.applyMove(0, 'CLAIM', { prize: 'lines5', card: 0 }); // only 4 lines
+    expect(pub(rt).bogeys[0]).toBe(1);
+    callAll(col4);
+    markAll(rt, 0, col4.filter((n) => !rows.flat().includes(n)));
+    rt.applyMove(0, 'CLAIM', { prize: 'lines5', card: 0 });
+    expect(pub(rt).prizes[0]!.winners).toEqual([{ seat: 0, card: 0 }]);
+    expect(pub(rt).scores[0]).toBe(40); // 50 − one bogey
   });
 
   it('the host can end the game early; highest score wins', () => {

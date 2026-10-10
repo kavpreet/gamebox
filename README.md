@@ -31,7 +31,7 @@ Open http://localhost:5173 and sign in as `alice@dev.local` / `gamebox-dev-1`
 - 2+ tabs (use private windows for different accounts) = the phones
 - create a game, **Cast here** to the TV, others join with the PIN, start, play.
 
-Tests: `npm test -w apps/backend` (139 tests over the engine + all 18 games).
+Tests: `npm test -w apps/backend` (142 tests over the engine + all 18 games).
 
 ---
 

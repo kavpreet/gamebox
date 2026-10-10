@@ -4,6 +4,7 @@ import {
   PRIZES,
   FREE,
   ballLabel,
+  countLines75,
   type BingoConfig,
   type BingoMove,
   type BingoView,
@@ -127,6 +128,62 @@ function CalledBoard({ view, cellSize }: { view: BingoView; cellSize: string }) 
   );
 }
 
+/** Combat mode: who chose the latest number. */
+function LastCaller({ view, summary }: { view: BingoView; summary: GameSummary }) {
+  if (view.config.callMode !== 'combat') return null;
+  const last = [...view.log].reverse().find((e) => e.kind === 'call');
+  if (!last || last.seat === undefined || view.calls.length === 0) return null;
+  return <span className="dim small center" style={{ display: 'block' }}>{seatName(summary, last.seat)} {last.text}</span>;
+}
+
+/** Combat mode: the caller picks any uncalled number. Numbers on your own cards are ringed. */
+function CombatPicker({ view, onCall }: { view: BingoView; onCall: (n: number) => Promise<string | null> }) {
+  const [picked, setPicked] = useState<number | null>(null);
+  const balls = view.config.balls;
+  const called = new Set(view.calls);
+  const onMine = new Set(view.yourCards?.cards.flatMap((c) => c.cells.flat()) ?? []);
+  const remaining = Array.from({ length: balls }, (_, i) => i + 1).filter((n) => !called.has(n));
+  const done = remaining.length === 0 || view.prizes.every((p) => p.wonAtCall !== null);
+  if (done) return <button onClick={() => void onCall(0)}>Finish the game</button>;
+  const call = async (n: number) => {
+    if (!(await onCall(n))) setPicked(null);
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <strong className="center">🎤 Your call — pick a number</strong>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: 3 }}>
+        {Array.from({ length: balls }, (_, i) => i + 1).map((n) => {
+          const gone = called.has(n);
+          return (
+            <button
+              key={n}
+              disabled={gone}
+              onClick={() => setPicked(n)}
+              style={{
+                padding: 0, minWidth: 0, aspectRatio: '1', borderRadius: 5, fontSize: '0.8rem', fontWeight: 700,
+                background: gone ? 'transparent' : picked === n ? 'var(--gold)' : 'var(--bg-raised)',
+                color: gone ? '#3a3f63' : picked === n ? '#11131f' : 'var(--text)',
+                borderBottom: gone ? undefined : `3px solid ${ballColor(balls, n)}`,
+                outline: !gone && onMine.has(n) ? `2px solid ${DAB}` : undefined,
+                outlineOffset: -2,
+              }}
+            >
+              {n}
+            </button>
+          );
+        })}
+      </div>
+      <p className="dim small" style={{ margin: 0 }}>Ringed numbers are on your card{(view.yourCards?.cards.length ?? 0) > 1 ? 's' : ''}.</p>
+      <div className="row">
+        <button className="grow" disabled={picked === null} onClick={() => picked !== null && void call(picked)}>
+          {picked === null ? 'Pick a number' : `Call ${ballLabel(balls, picked)}`}
+        </button>
+        <button className="secondary" onClick={() => void call(remaining[Math.floor(Math.random() * remaining.length)]!)}>🎲 Random</button>
+      </div>
+    </div>
+  );
+}
+
 function LogFeed({ log, summary, limit }: { log: LogEntry[]; summary: GameSummary; limit: number }) {
   const items = log.filter((e) => e.kind !== 'call').slice(-limit).reverse();
   if (items.length === 0) return null;
@@ -179,7 +236,8 @@ function Scoreboard({ view, summary, big }: { view: BingoView; summary: GameSumm
 }
 
 function configSummary(c: BingoConfig): string {
-  const mode = c.callMode === 'auto' ? `auto every ${c.intervalSec}s` : 'round-robin calling';
+  const mode = c.callMode === 'auto' ? `auto every ${c.intervalSec}s`
+    : c.callMode === 'combat' ? 'combat calling (players pick the numbers)' : 'round-robin calling';
   return `${c.balls}-ball · ${mode} · ${c.cardsPerPlayer} card${c.cardsPerPlayer > 1 ? 's' : ''} each · bogey −${c.penalty}`;
 }
 
@@ -241,7 +299,13 @@ function SetupPanel({ view, isHost, submitMove, summary }: {
         <span className="grow">Calling</span>
         <button className={cfg.callMode === 'auto' ? '' : 'secondary'} onClick={() => send({ ...cfg, callMode: 'auto' })}>Auto</button>
         <button className={cfg.callMode === 'roundRobin' ? '' : 'secondary'} onClick={() => send({ ...cfg, callMode: 'roundRobin' })}>Take turns</button>
+        <button className={cfg.callMode === 'combat' ? '' : 'secondary'} onClick={() => send({ ...cfg, callMode: 'combat' })}>Combat</button>
       </div>
+      <p className="dim small" style={{ margin: 0 }}>
+        {cfg.callMode === 'auto' && 'Balls are drawn at random on a timer.'}
+        {cfg.callMode === 'roundRobin' && 'Players take turns drawing a random ball.'}
+        {cfg.callMode === 'combat' && 'Players take turns choosing the next number — help your card, starve everyone else’s.'}
+      </p>
 
       {cfg.callMode === 'auto' && (
         <div className="row">
@@ -301,22 +365,37 @@ function SetupPanel({ view, isHost, submitMove, summary }: {
 
 // ── player's card ────────────────────────────────────────────────────────────
 
-function CardGrid({ card, marks, balls, called, hints, onTap }: {
+function CardGrid({ card, marks, balls, called, hints, showLines, onTap }: {
   card: Card;
   marks: number[];
   balls: 75 | 90;
   called: Set<number>;
   hints: boolean;
+  /** strike a BINGO letter per full line dabbed (5-lines games) */
+  showLines: boolean;
   onTap: (n: number) => void;
 }) {
   const marked = new Set(marks);
   const cols = card.cells[0]!.length;
+  const lines = showLines ? countLines75(card, (n) => n === FREE || marked.has(n)) : 0;
   return (
     <div>
       {balls === 75 && (
         <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 4, marginBottom: 4 }}>
           {['B', 'I', 'N', 'G', 'O'].map((l, i) => (
-            <div key={l} className="center" style={{ fontWeight: 800, color: LETTER_COLORS[i] }}>{l}</div>
+            <div
+              key={l}
+              className="center"
+              title={showLines ? `${lines} line${lines === 1 ? '' : 's'} marked` : undefined}
+              style={{
+                fontWeight: 800, borderRadius: 6,
+                color: i < lines ? '#11131f' : LETTER_COLORS[i],
+                background: i < lines ? LETTER_COLORS[i] : undefined,
+                textDecoration: i < lines ? 'line-through' : undefined,
+              }}
+            >
+              {l}
+            </div>
           ))}
         </div>
       )}
@@ -389,7 +468,7 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<BingoView, 
   const called = new Set(view.calls);
   const mine = view.yourCards;
   const playing = view.phase === 'playing' && state.status === 'active';
-  const myTurnToCall = view.config.callMode === 'roundRobin' && view.caller === yourSeat;
+  const myTurnToCall = view.config.callMode !== 'auto' && view.caller === yourSeat;
 
   return (
     <div className="page">
@@ -403,16 +482,19 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<BingoView, 
         </div>
         {state.status === 'completed' && <WinnerBanner state={state} />}
         <RecentBalls view={view} size={72} />
+        <LastCaller view={view} summary={state.summary} />
         {playing && view.config.callMode === 'auto' && (
           <p className="dim small center">
             {view.autoPaused ? '⏸ Calling paused' : remaining !== null ? `Next ball in ${Math.ceil(remaining / 1000)}s` : ''}
           </p>
         )}
-        {playing && view.config.callMode === 'roundRobin' && (
-          myTurnToCall ? (
-            <button onClick={() => void submitMove('DRAW', { at: view.calls.length })}>🎱 Your turn — draw a ball</button>
+        {playing && view.config.callMode !== 'auto' && (
+          !myTurnToCall ? (
+            <p className="dim small center">{seatName(state.summary, view.caller!)} is {view.config.callMode === 'combat' ? 'choosing a number' : 'calling'}…</p>
+          ) : view.config.callMode === 'combat' ? (
+            <CombatPicker view={view} onCall={(n) => submitMove('DRAW', { at: view.calls.length, n })} />
           ) : (
-            <p className="dim small center">{seatName(state.summary, view.caller!)} is calling…</p>
+            <button onClick={() => void submitMove('DRAW', { at: view.calls.length })}>🎱 Your turn — draw a ball</button>
           )
         )}
         {playing && isHost && (
@@ -441,6 +523,7 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<BingoView, 
             balls={view.config.balls}
             called={called}
             hints={hints}
+            showLines={view.prizes.some((p) => /^lines?\d?$/.test(p.id))}
             onTap={(n) => playing && void submitMove('MARK', { card: ci, n })}
           />
           {playing && (
@@ -529,9 +612,10 @@ function TvView({ state }: TvViewProps<BingoView>) {
           {view.phase === 'playing' && view.config.callMode === 'auto' && (
             <span className="dim">{view.autoPaused ? '⏸ paused' : remaining !== null ? `next in ${Math.ceil(remaining / 1000)}s` : ''}</span>
           )}
-          {view.phase === 'playing' && view.config.callMode === 'roundRobin' && view.caller !== null && (
-            <span className="dim">🎤 {seatName(state.summary, view.caller)} draws next</span>
+          {view.phase === 'playing' && view.config.callMode !== 'auto' && view.caller !== null && (
+            <span className="dim">🎤 {seatName(state.summary, view.caller)} {view.config.callMode === 'combat' ? 'picks' : 'draws'} next</span>
           )}
+          <LastCaller view={view} summary={state.summary} />
           <button className="ghost" onClick={() => setVoice((v) => !v)} style={{ fontSize: '2.2vmin' }}>
             {voice ? '🔊 voice on' : '🔇 tap for voice'}
           </button>
