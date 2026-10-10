@@ -12,6 +12,7 @@
   "dependencies": {
     "@gamebox/core-engine": "*",
     "@gamebox/game-azul": "*",
+    "@gamebox/game-bingo": "*",
     "@gamebox/game-catan": "*",
     "@gamebox/game-checkers": "*",
     "@gamebox/game-chess": "*",
