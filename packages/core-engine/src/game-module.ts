@@ -1,7 +1,26 @@
-import type { Seat, Viewer, DisconnectOption } from '@gamebox/shared-types';
+import type {
+  Seat,
+  Viewer,
+  DisconnectOption,
+  Beat,
+  BeatKind,
+  GameOptionDef,
+  GameOptions,
+  TableOptions,
+} from '@gamebox/shared-types';
+import { DEFAULT_TABLE_OPTIONS } from '@gamebox/shared-types';
 import type { SeededRandom } from './rng.js';
 
-export type { Seat, Viewer };
+export type { Seat, Viewer, Beat, BeatKind, GameOptionDef, GameOptions, TableOptions };
+export { DEFAULT_TABLE_OPTIONS };
+
+/**
+ * Records the ordered steps inside one move so the client can replay them with
+ * pacing. Modules call `emit` where they used to overwrite a single
+ * `lastEvent` string — a module that never calls it still plays a correct
+ * game, it just tells no story.
+ */
+export type EmitBeat = (beat: Beat) => void;
 
 export interface GameState<TPublic, TPrivate> {
   public: TPublic;
@@ -19,6 +38,16 @@ export interface MoveCtx<TPublic, TPrivate, TMove> {
   seat: Seat;
   payload: TMove;
   rng: SeededRandom;
+  /** Narrate this move step by step. Presentation only — never rules. */
+  emit: EmitBeat;
+  /**
+   * How the table is played — manual pieces, clock, pacing. Never rules.
+   *
+   * The house rules deliberately aren't here: setup() receives them and a
+   * module that needs them later stashes them in its own public state, so the
+   * engine never has to hold game-specific rule values.
+   */
+  table: TableOptions;
 }
 
 export class IllegalMove extends Error {
@@ -36,12 +65,34 @@ export class IllegalMove extends Error {
 export interface GameModule<TPublic = unknown, TPrivate = unknown, TMove = unknown> {
   slug: string;
   displayName: string;
+  /** One-liner shown on the TV lobby and pickers. */
+  description?: string;
   rulesVersion: string;
   minPlayers: number;
   maxPlayers: number;
   teams?: 'none' | 'optional' | 'required';
 
-  setup(seats: { seat: Seat; team?: number }[], rng: SeededRandom): GameState<TPublic, TPrivate>;
+  /**
+   * Alternate ("house") rules this module supports, declared as data so the
+   * lobby can render pickers and the server can validate choices without
+   * knowing anything about the game. The chosen values reach setup(); modules
+   * that need them later stash them in their own public state.
+   */
+  options?: readonly GameOptionDef[];
+
+  /**
+   * Manual-mode support: true when this module splits its atomic moves into
+   * separate player-confirmed physical acts (walk the token, hand over the
+   * rent). The lobby only offers the manual toggle for modules that say yes.
+   */
+  supportsManual?: boolean;
+
+  setup(
+    seats: { seat: Seat; team?: number }[],
+    rng: SeededRandom,
+    options: GameOptions,
+    table?: TableOptions,
+  ): GameState<TPublic, TPrivate>;
 
   /** Who may act right now — derived from state on every call, never a static flag. */
   activePlayers(state: GameState<TPublic, TPrivate>): Seat[];

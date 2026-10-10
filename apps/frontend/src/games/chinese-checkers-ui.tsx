@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
+import type { GameSummary } from '@gamebox/shared-types';
 import type { CCPublic, CCMove } from '@gamebox/game-chinese-checkers';
 import { allCells, destinations } from '@gamebox/game-chinese-checkers';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, SeatTokens, WinnerBanner } from './common.js';
+import { TableStage, TableLog } from './chrome.js';
+import { seatName, SeatToken, SeatTokens, WinnerBanner, Prompt, Waiting, useHandMove, HandGlyph, FxDefs, useBoardFit } from './common.js';
 
-const SEAT_COLORS = ['#e94560', '#2ec4b6', '#f5a623', '#7c5cff', '#3fa7ff', '#9ad14b'];
 const R = 16; // hole radius in svg units
 const SP = 38; // spacing
 
@@ -22,39 +23,78 @@ const EXTENT = 8.7 * SP;
 
 function Board({
   view,
+  summary,
   yourSeat,
   selected,
   targets,
   onCell,
 }: {
   view: CCPublic;
+  summary: GameSummary;
   yourSeat?: number;
   selected?: string | null;
   targets?: Set<string>;
   onCell?: (cell: string) => void;
 }) {
+  const lm = view.lastMove;
+  const moveKey = lm ? `${lm.seat}-${lm.from}-${lm.to}` : null;
+  const slidePos = useHandMove(
+    moveKey,
+    lm ? (({ px, py }) => ({ x: px, y: py }))(xy(lm.from)) : null,
+    lm ? (({ px, py }) => ({ x: px, y: py }))(xy(lm.to)) : null,
+  );
+  const fit = useBoardFit();
   return (
     <svg
       viewBox={`${-EXTENT} ${-EXTENT} ${2 * EXTENT} ${2 * EXTENT}`}
-      style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}
+      preserveAspectRatio={fit}
+      style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}
     >
+      <FxDefs />
+      <defs>
+        <radialGradient id="cc-bg" cx="50%" cy="42%" r="80%">
+          <stop offset="0%" stopColor="#2b3268" />
+          <stop offset="65%" stopColor="#1a2050" />
+          <stop offset="100%" stopColor="#101433" />
+        </radialGradient>
+      </defs>
+      <circle cx={0} cy={0} r={EXTENT * 0.98} fill="url(#cc-bg)" stroke="#3d4680" strokeWidth={3} />
+      <circle cx={0} cy={0} r={EXTENT * 0.98} fill="url(#gb-vignette)" style={{ pointerEvents: 'none' }} />
       {CELLS.map((cell) => {
         const { px, py } = xy(cell);
         const owner = view.pegs[cell];
         const isSel = selected === cell;
         const isTarget = targets?.has(cell);
-        const wasLast = view.lastMove && (view.lastMove.from === cell || view.lastMove.to === cell);
+        const wasLast = lm && (lm.from === cell || lm.to === cell);
+        const hidePeg = slidePos && lm?.to === cell;
         return (
           <g key={cell} onClick={onCell ? () => onCell(cell) : undefined} style={onCell ? { cursor: 'pointer' } : undefined}>
-            <circle cx={px} cy={py} r={R}
-              fill={owner !== undefined ? SEAT_COLORS[owner % 6] : '#1b2038'}
-              stroke={isSel ? '#ffffff' : isTarget ? '#2ec4b6' : wasLast ? '#f5a623' : '#2c3255'}
-              strokeWidth={isSel || isTarget ? 3.5 : 1.5}
-            />
-            {isTarget && owner === undefined && <circle cx={px} cy={py} r={R * 0.35} fill="rgba(46,196,182,0.7)" />}
+            {/* hole */}
+            <circle cx={px} cy={py + 1.5} r={R} fill="rgba(0,0,0,0.5)" />
+            {owner !== undefined && !hidePeg ? (
+              <SeatToken summary={summary} seat={owner} cx={px} cy={py} r={R} />
+            ) : (
+              <circle cx={px} cy={py} r={R} fill="#0d1024" stroke="#333c68" strokeWidth={1.5} />
+            )}
+            {(isSel || isTarget || wasLast) && (
+              <circle cx={px} cy={py} r={R} fill="none"
+                stroke={isSel ? '#ffffff' : isTarget ? '#2ee6c9' : '#ffb930'}
+                strokeWidth={3.5} />
+            )}
+            {isTarget && owner === undefined && (
+              <circle cx={px} cy={py} r={R * 0.35} fill="rgba(46,230,201,0.8)">
+                <animate attributeName="r" values={`${R * 0.28};${R * 0.42};${R * 0.28}`} dur="1.2s" repeatCount="indefinite" />
+              </circle>
+            )}
           </g>
         );
       })}
+      {slidePos && lm && (
+        <g style={{ filter: 'drop-shadow(0 4px 5px rgba(0,0,0,0.55))', pointerEvents: 'none' }}>
+          <SeatToken summary={summary} seat={lm.seat} cx={slidePos.x} cy={slidePos.y} r={R} />
+          <HandGlyph x={slidePos.x} y={slidePos.y} phase={slidePos.phase} t={slidePos.t} size={R * 2.6} />
+        </g>
+      )}
     </svg>
   );
 }
@@ -65,7 +105,9 @@ function TvView({ state }: TvViewProps<CCPublic>) {
   return (
     <div className="tv-main">
       <div className="tv-board">
-        <Board view={view} />
+        <TableStage sides={6} tilt={44}>
+          <Board view={view} summary={state.summary} />
+        </TableStage>
       </div>
       <div className="tv-sidebar">
         <SeatTokens summary={state.summary} activeSeats={state.activeSeats} />
@@ -75,6 +117,7 @@ function TvView({ state }: TvViewProps<CCPublic>) {
           </div>
         )}
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );
@@ -105,15 +148,13 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<CCPublic, C
         {state.status === 'completed' ? (
           <WinnerBanner state={state} />
         ) : myTurn ? (
-          <p style={{ color: 'var(--gold)', fontWeight: 700 }}>
-            {selected ? 'Tap a highlighted hole' : 'Your turn — tap one of your pegs'}
-          </p>
+          <Prompt>{selected ? 'Tap a highlighted hole' : 'Your turn — tap one of your pegs'}</Prompt>
         ) : (
-          <p className="dim">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</p>
+          <Waiting state={state} />
         )}
       </div>
-      <div className="card">
-        <Board view={view} yourSeat={yourSeat} selected={selected} targets={targets} onCell={onCell} />
+      <div className="board-frame">
+        <Board view={view} summary={state.summary} yourSeat={yourSeat} selected={selected} targets={targets} onCell={onCell} />
       </div>
     </div>
   );

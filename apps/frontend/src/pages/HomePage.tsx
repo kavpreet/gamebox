@@ -3,6 +3,13 @@ import { Link, useNavigate } from 'react-router-dom';
 import type { GameSummary, RoomDTO } from '@gamebox/shared-types';
 import { api, type GameTypeInfo } from '../api.js';
 
+const GAME_ICONS: Record<string, string> = {
+  'snakes-and-ladders': '🐍', ludo: '🎲', uno: '🃏', 'uno-flip': '🔄', chess: '♞',
+  'chinese-checkers': '⭐', rummy: '🂡', checkers: '⚫', risk: '🌍', pandemic: '🦠',
+  monopoly: '🎩', catan: '🏝️', codenames: '🕵️', azul: '🀄', scattergories: '✍️',
+  scrabble: '🔤', pictionary: '🖌️', 'ticket-to-ride': '🚂', 'ticket-to-ride-europe': '🚆',
+};
+
 const STATUS_LABELS: Record<string, string> = {
   lobby: 'waiting to start',
   active: 'in progress',
@@ -76,15 +83,25 @@ export function HomePage() {
 
       <div className="card">
         <h2>Start a new game</h2>
-        <select value={selectedType} onChange={(e) => setSelectedType(e.target.value)}>
+        <div className="game-grid">
           {types.map((t) => (
-            <option key={t.slug} value={t.slug}>
-              {t.displayName} ({t.minPlayers}–{t.maxPlayers} players)
-            </option>
+            <div
+              key={t.slug}
+              className={`game-tile${selectedType === t.slug ? ' selected' : ''}`}
+              onClick={() => setSelectedType(t.slug)}
+            >
+              <span className="icon">{GAME_ICONS[t.slug] ?? '🎮'}</span>
+              <span className="name">{t.displayName}</span>
+            </div>
           ))}
-        </select>
+        </div>
+        {selectedType && (
+          <p className="dim small center">
+            {types.find((t) => t.slug === selectedType)?.minPlayers}–{types.find((t) => t.slug === selectedType)?.maxPlayers} players
+          </p>
+        )}
         <button onClick={createGame} disabled={busy || !selectedType}>
-          Create game
+          Create {types.find((t) => t.slug === selectedType)?.displayName ?? 'game'}
         </button>
       </div>
 
@@ -117,7 +134,21 @@ export function HomePage() {
               <span>
                 📺 {r.name} <span className="dim small">({r.pairingCode})</span>
               </span>
-              {r.activeGameId ? <Link to={`/game/${r.activeGameId}`}>showing a game</Link> : <span className="dim small">idle</span>}
+              {r.activeGameId ? (
+                <span className="row" style={{ gap: 6 }}>
+                  <Link to={`/game/${r.activeGameId}`}>showing a game</Link>
+                  <button
+                    className="ghost"
+                    onClick={() =>
+                      api.assignRoom(r.pairingCode, null).then(() => api.rooms().then(setRooms))
+                    }
+                  >
+                    Disconnect
+                  </button>
+                </span>
+              ) : (
+                <span className="dim small">idle</span>
+              )}
             </div>
           ))}
         </div>

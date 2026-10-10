@@ -101,6 +101,7 @@ function checkElimination(pub: RiskPublic): void {
 export const risk: GameModule<RiskPublic, RiskPrivate, RiskMove> = {
   slug: 'risk',
   displayName: 'Risk',
+  description: 'World domination — reinforce, attack, and conquer all 42 territories.',
   rulesVersion: '1.0.0',
   minPlayers: 2,
   maxPlayers: 6,
@@ -167,7 +168,7 @@ export const risk: GameModule<RiskPublic, RiskPrivate, RiskMove> = {
       if (pub.reinforcementsLeft === 0) pub.phase = 'ATTACK';
     },
 
-    ATTACK({ state, seat, payload, rng }) {
+    ATTACK({ state, seat, payload, rng, emit }) {
       const pub = state.public;
       if (seat !== currentSeat(pub)) throw new IllegalMove('Not your turn');
       if (pub.phase !== 'ATTACK') throw new IllegalMove('Not the attack phase');
@@ -202,6 +203,25 @@ export const risk: GameModule<RiskPublic, RiskPrivate, RiskMove> = {
         checkElimination(pub);
       }
       pub.lastBattle = { from, to, attackerDice, defenderDice, attackerLosses, defenderLosses, conquered };
+      // Both sets of dice, then the casualties, then the flag change — the
+      // three separate things that happen in one throw at a real table.
+      emit({
+        kind: 'dice',
+        seat,
+        text: `attacks ${to} from ${from}`,
+        data: { dice: attackerDice, defenderDice },
+        holdMs: 1500,
+      });
+      emit({
+        kind: 'capture',
+        seat,
+        text: `${from} loses ${attackerLosses}, ${to} loses ${defenderLosses}`,
+        data: { from, to, attackerLosses, defenderLosses },
+        holdMs: 1300,
+      });
+      if (conquered) {
+        emit({ kind: 'build', seat, text: `takes ${to}!`, data: { territory: to }, holdMs: 1800 });
+      }
     },
 
     MOVE_IN({ state, seat, payload }) {

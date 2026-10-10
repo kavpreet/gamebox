@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { GameRuntime, IllegalMove } from '@gamebox/core-engine';
-import { ludo, movableTokens, globalSquare, HOME, type LudoPublic } from '@gamebox/game-ludo';
+import {
+  ludo, movableTokens, globalSquare, HOME, LUDO_STANDARD_RULES, type LudoPublic,
+} from '@gamebox/game-ludo';
 
 function newGame(seed = 1, players = 2) {
   const seats = Array.from({ length: players }, (_, i) => ({ seat: i }));
@@ -20,6 +22,8 @@ describe('ludo', () => {
       turnIndex: 0,
       phase: 'ROLL',
       die: null,
+      sixStreak: 0,
+      rules: { ...LUDO_STANDARD_RULES },
       lastEvent: null,
       winner: null,
     };
@@ -35,6 +39,8 @@ describe('ludo', () => {
       turnIndex: 0,
       phase: 'ROLL',
       die: null,
+      sixStreak: 0,
+      rules: { ...LUDO_STANDARD_RULES },
       lastEvent: null,
       winner: null,
     };

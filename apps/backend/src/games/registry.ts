@@ -23,6 +23,7 @@ import { azul } from '@gamebox/game-azul';
 import { scattergories } from '@gamebox/game-scattergories';
 import { scrabble } from '@gamebox/game-scrabble';
 import { pictionary } from '@gamebox/game-pictionary';
+import { ticketToRide, ticketToRideEurope } from '@gamebox/game-ticket-to-ride';
 import { bingo } from '@gamebox/game-bingo';
 
 const modules: GameModule<any, any, any>[] = [
@@ -43,6 +44,8 @@ const modules: GameModule<any, any, any>[] = [
   scattergories,
   scrabble,
   pictionary,
+  ticketToRide,
+  ticketToRideEurope,
   bingo,
 ];
 

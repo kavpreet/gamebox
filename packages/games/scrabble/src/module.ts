@@ -247,6 +247,7 @@ function nextTurn(pub: ScrabblePublic): void {
 export const scrabble: GameModule<ScrabblePublic, SeatPrivate | Hidden, ScrabbleMove> = {
   slug: 'scrabble',
   displayName: 'Scrabble',
+  description: 'Spell words on premium squares; your table is the dictionary.',
   rulesVersion: '1.0.0',
   minPlayers: 2,
   maxPlayers: 4,

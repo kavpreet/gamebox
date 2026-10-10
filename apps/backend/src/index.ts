@@ -1,12 +1,13 @@
 import { createServer } from 'node:http';
 import { config } from './config.js';
 import { getDb } from './db/index.js';
-import { migrateAppTables } from './db/migrate.js';
+import { migrateAppTables, seedAllowlist } from './db/migrate.js';
 import { getAuth, migrateAuthTables } from './auth.js';
 import { GameService } from './services/game-service.js';
 import { RoomService } from './services/room-service.js';
+import { AdminService } from './services/admin-service.js';
 import { buildHttpApp } from './http.js';
-import { setupSockets, getBroadcast, getNotifyRoom } from './sockets.js';
+import { setupSockets, getBroadcast, getNotifyRoom, getEvictRoom } from './sockets.js';
 
 // Node's HTTP internals (and engine.io's polling transport in particular)
 // can throw ERR_HTTP_HEADERS_SENT outside any request handler's try/catch —
@@ -27,8 +28,12 @@ async function main() {
   const auth = await getAuth();
   await migrateAuthTables();
 
+  const seeded = await seedAllowlist(db);
+  if (seeded > 0) console.log(`Seeded the allowlist with ${seeded} email(s) from env`);
+
   const games = new GameService(db);
   const rooms = new RoomService(db);
+  const admin = new AdminService(db, auth);
 
   const discontinued = await games.syncGameTypes();
   if (discontinued.length > 0) {
@@ -37,7 +42,15 @@ async function main() {
 
   const httpServer = createServer();
   const io = setupSockets(httpServer, auth, games, rooms);
-  const app = buildHttpApp(auth, games, rooms, getNotifyRoom(io), getBroadcast(io));
+  const app = buildHttpApp(
+    auth,
+    games,
+    rooms,
+    admin,
+    getNotifyRoom(io),
+    getBroadcast(io),
+    getEvictRoom(io),
+  );
   httpServer.on('request', app);
 
   // Daily retention job (plan §5.3): purge stale lobby/active/paused +
@@ -57,6 +70,7 @@ async function main() {
     console.log(`GameBox backend listening on :${config.port}`);
     console.log(`  auth: email/password=${config.emailPasswordEnabled}, google=${Boolean(config.googleClientId)}`);
     console.log(`  db: ${config.databaseUrl ? 'postgres' : `sqlite (${config.sqlitePath})`}`);
+    console.log(`  admin: ${config.adminEmails.join(', ') || '(none)'}`);
   });
 }
 

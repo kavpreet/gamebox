@@ -248,6 +248,7 @@ function discardFromHand(s: State, seat: Seat, predicate: (c: PlayerCard) => boo
 export const pandemic: GameModule<PandemicPublic, PandemicPrivate | Hidden, PandemicMove> = {
   slug: 'pandemic',
   displayName: 'Pandemic',
+  description: 'Co-op: cure four diseases before outbreaks overwhelm the world.',
   rulesVersion: '1.0.0',
   minPlayers: 2,
   maxPlayers: 4,

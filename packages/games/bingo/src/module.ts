@@ -249,6 +249,7 @@ function requirePlaying(pub: BingoPublic): void {
 export const bingo: GameModule<BingoPublic, PlayerCards | Hidden, BingoMove> = {
   slug: 'bingo',
   displayName: 'Bingo / Tambola',
+  description: '75- or 90-ball bingo with tambola prizes — auto, take-turns or combat calling.',
   rulesVersion: '1.0.0',
   minPlayers: 1,
   maxPlayers: 16,

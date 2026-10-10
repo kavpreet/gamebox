@@ -4,7 +4,12 @@ import {
   cornersOf, hexCenter, vertexXY, edgeVertices, hexKey, RESOURCES,
 } from '@gamebox/game-catan';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, WinnerBanner } from './common.js';
+import { TableStage, TableLog } from './chrome.js';
+import type { GameSummary } from '@gamebox/shared-types';
+import {
+  seatName, seatColor, SeatDot, WinnerBanner, Prompt, Waiting, EventLine, useBoardFit,
+  useHandMove, HandGlyph, FxDefs,
+} from './common.js';
 
 type CatanView = CatanPublic & {
   yourResources: Record<Resource, number> | null;
@@ -12,9 +17,11 @@ type CatanView = CatanPublic & {
   yourNewDevCards: DevCard[] | null;
 };
 
-const SEAT_COLORS = ['#e94560', '#2ec4b6', '#f5a623', '#7c5cff'];
 const TILE_HEX: Record<string, string> = {
   wood: '#2e7d46', brick: '#b3552e', sheep: '#8fce5a', wheat: '#e5c355', ore: '#8b90a8', desert: '#d8c48f',
+};
+const TILE_DARK: Record<string, string> = {
+  wood: '#1f5931', brick: '#8a3f20', sheep: '#6aa63f', wheat: '#c2a338', ore: '#6a6f88', desert: '#b8a476',
 };
 const TILE_EMOJI: Record<string, string> = {
   wood: '🌲', brick: '🧱', sheep: '🐑', wheat: '🌾', ore: '⛰', desert: '🏜',
@@ -46,6 +53,7 @@ function orderedHexPolygon(q: number, r: number): string {
 
 function Board({
   view,
+  summary,
   clickVertices,
   clickEdges,
   clickHexes,
@@ -54,6 +62,7 @@ function Board({
   onHex,
 }: {
   view: CatanView;
+  summary: GameSummary;
   clickVertices?: Set<string>;
   clickEdges?: Set<string>;
   clickHexes?: Set<string>;
@@ -68,34 +77,94 @@ function Board({
     return [...set];
   }, [view.roads, clickEdges]);
 
+  // robber: no from/to on the wire, so remember the previous hex ourselves
+  // and glide across the board instead of teleporting.
+  const prevRobberRef = React.useRef<string | null>(null);
+  const prevRobber = prevRobberRef.current;
+  React.useEffect(() => {
+    prevRobberRef.current = view.robber;
+  }, [view.robber]);
+  const centerOfHex = (key: string): { x: number; y: number } | null => {
+    const h = view.hexes.find((hh) => hexKey(hh.q, hh.r) === key);
+    return h ? px(hexCenter(h.q, h.r)) : null;
+  };
+  const robberMoveKey = prevRobber && prevRobber !== view.robber ? `${prevRobber}->${view.robber}` : null;
+  const robberSlide = useHandMove(
+    robberMoveKey,
+    prevRobber ? centerOfHex(prevRobber) : null,
+    centerOfHex(view.robber),
+    650,
+  );
+
+  // pop in buildings added after mount (skip the initial render/rehydrate)
+  const seenBuildings = React.useRef<Set<string> | null>(null);
+  const firstRender = seenBuildings.current === null;
+  if (seenBuildings.current === null) seenBuildings.current = new Set(Object.keys(view.buildings));
+  const isNewBuilding = (v: string) => !firstRender && !seenBuildings.current!.has(v);
+  React.useEffect(() => {
+    for (const v of Object.keys(view.buildings)) seenBuildings.current!.add(v);
+  }, [view.buildings]);
+
+  const fit = useBoardFit();
   return (
-    <svg viewBox="0 0 680 600" style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
+    <svg viewBox="0 0 680 600" preserveAspectRatio={fit}
+      style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}>
+      <defs>
+        <radialGradient id="catan-sea" cx="50%" cy="45%" r="75%">
+          <stop offset="0%" stopColor="#123056" />
+          <stop offset="100%" stopColor="#0a1a34" />
+        </radialGradient>
+        {Object.keys(TILE_HEX).map((t) => (
+          <linearGradient key={t} id={`tile-${t}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={TILE_HEX[t]} />
+            <stop offset="100%" stopColor={TILE_DARK[t]} />
+          </linearGradient>
+        ))}
+      </defs>
+      <FxDefs />
+      <rect width={680} height={600} rx={16} fill="url(#catan-sea)" />
       {view.hexes.map((h) => {
         const key = hexKey(h.q, h.r);
         const c = px(hexCenter(h.q, h.r));
         const clickable = clickHexes?.has(key);
+        const prob = h.token !== null ? 6 - Math.abs(7 - h.token) : 0;
         return (
           <g key={key} onClick={clickable && onHex ? () => onHex(key) : undefined}
             style={clickable ? { cursor: 'pointer' } : undefined}>
-            <polygon points={orderedHexPolygon(h.q, h.r)} fill={TILE_HEX[h.tile]}
-              stroke={clickable ? '#2ec4b6' : '#0f1220'} strokeWidth={clickable ? 4 : 2.5}
-              opacity={0.9} />
-            <text x={c.x} y={c.y - 8} textAnchor="middle" fontSize={18}>{TILE_EMOJI[h.tile]}</text>
+            <polygon points={orderedHexPolygon(h.q, h.r)} fill={`url(#tile-${h.tile})`}
+              stroke={clickable ? '#2ee6c9' : '#0a1a34'} strokeWidth={clickable ? 4.5 : 3} />
+            <text x={c.x} y={c.y - 10} textAnchor="middle" fontSize={19}>{TILE_EMOJI[h.tile]}</text>
             {h.token !== null && (
               <>
-                <circle cx={c.x} cy={c.y + 12} r={13} fill="#f4ecd7" stroke="#0f1220" />
-                <text x={c.x} y={c.y + 17} textAnchor="middle" fontSize={13} fontWeight={800}
-                  fill={h.token === 6 || h.token === 8 ? '#c62828' : '#333'}>
+                <circle cx={c.x} cy={c.y + 13} r={14} fill="#f6efdb" stroke="#0a1a34" strokeWidth={1.5} />
+                <text x={c.x} y={c.y + 16} textAnchor="middle" fontSize={13.5} fontWeight={900}
+                  fill={h.token === 6 || h.token === 8 ? '#c62828' : '#4a4232'}>
                   {h.token}
                 </text>
+                <g>
+                  {Array.from({ length: prob }, (_, i) => (
+                    <circle key={i} cx={c.x - (prob - 1) * 2.2 + i * 4.4} cy={c.y + 23} r={1.4}
+                      fill={h.token === 6 || h.token === 8 ? '#c62828' : '#4a4232'} />
+                  ))}
+                </g>
               </>
             )}
-            {view.robber === key && (
-              <text x={c.x} y={c.y + 40} textAnchor="middle" fontSize={22}>🦹</text>
+            {view.robber === key && !robberSlide && (
+              <g>
+                <ellipse cx={c.x} cy={c.y + 40} rx={13} ry={6} fill="rgba(0,0,0,0.45)" />
+                <text x={c.x} y={c.y + 42} textAnchor="middle" fontSize={24}>🦹</text>
+              </g>
             )}
           </g>
         );
       })}
+      {robberSlide && (
+        <g style={{ pointerEvents: 'none' }}>
+          <ellipse cx={robberSlide.x} cy={robberSlide.y + 40} rx={13} ry={6} fill="rgba(0,0,0,0.45)" />
+          <text x={robberSlide.x} y={robberSlide.y + 42} textAnchor="middle" fontSize={24}>🦹</text>
+          <HandGlyph x={robberSlide.x} y={robberSlide.y + 30} phase={robberSlide.phase} t={robberSlide.t} size={34} />
+        </g>
+      )}
       {/* roads + buildable edges */}
       {allEdges.map((e) => {
         const [a, b] = edgeVertices(e);
@@ -106,7 +175,7 @@ function Board({
         if (owner === undefined && !clickable) return null;
         return (
           <line key={e} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
-            stroke={owner !== undefined ? SEAT_COLORS[owner % 4] : 'rgba(46,196,182,0.55)'}
+            stroke={owner !== undefined ? seatColor(summary, owner) : 'rgba(46,196,182,0.55)'}
             strokeWidth={owner !== undefined ? 7 : 9}
             strokeLinecap="round"
             strokeDasharray={clickable ? '4 6' : undefined}
@@ -117,12 +186,17 @@ function Board({
       {/* buildings + buildable vertices */}
       {Object.entries(view.buildings).map(([v, b]) => {
         const p = px(vertexXY(v));
+        const bc = seatColor(summary, b.owner);
         return b.city ? (
-          <rect key={v} x={p.x - 10} y={p.y - 10} width={20} height={20} rx={4}
-            fill={SEAT_COLORS[b.owner % 4]} stroke="#0f1220" strokeWidth={2.5} />
+          <g key={v} className={isNewBuilding(v) ? 'gb-pop' : undefined}>
+            <rect x={p.x - 10} y={p.y - 8} width={20} height={17} rx={3}
+              fill={bc} stroke="#ffffff" strokeWidth={2} />
+            <path d={`M ${p.x - 11} ${p.y - 8} L ${p.x} ${p.y - 17} L ${p.x + 11} ${p.y - 8} Z`}
+              fill={bc} stroke="#ffffff" strokeWidth={2} />
+          </g>
         ) : (
-          <circle key={v} cx={p.x} cy={p.y} r={9}
-            fill={SEAT_COLORS[b.owner % 4]} stroke="#0f1220" strokeWidth={2.5} />
+          <circle key={v} cx={p.x} cy={p.y} r={9} className={isNewBuilding(v) ? 'gb-pop' : undefined}
+            fill={bc} stroke="#ffffff" strokeWidth={2} />
         );
       })}
       {clickVertices && [...clickVertices].map((v) => {
@@ -138,12 +212,12 @@ function Board({
   );
 }
 
-function Sidebar({ state, view }: { state: { summary: any; activeSeats: number[] }; view: CatanView }) {
+function Sidebar({ state, view }: { state: { summary: GameSummary; activeSeats: number[] }; view: CatanView }) {
   return (
     <>
       {view.order.map((s) => (
         <div key={s} className={`tv-player-chip ${state.activeSeats.includes(s) ? 'active' : ''}`}>
-          <span className="token" style={{ background: SEAT_COLORS[s % 4] }} />
+          <SeatDot summary={state.summary} seat={s} />
           <span className="grow">
             {seatName(state.summary, s)}
             <div className="dim small">
@@ -165,7 +239,9 @@ function TvView({ state }: TvViewProps<CatanView>) {
   return (
     <div className="tv-main">
       <div className="tv-board">
-        <Board view={view} />
+        <TableStage sides={4} tilt={42}>
+          <Board view={view} summary={state.summary} />
+        </TableStage>
       </div>
       <div className="tv-sidebar">
         <Sidebar state={state} view={view} />
@@ -173,6 +249,7 @@ function TvView({ state }: TvViewProps<CatanView>) {
         {view.phase === 'SETUP' && <div className="tv-player-chip dim">initial placement…</div>}
         {view.lastEvent && <div className="tv-player-chip dim small">{view.lastEvent}</div>}
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );
@@ -255,14 +332,14 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<CatanView, 
         {state.status === 'completed' ? (
           <WinnerBanner state={state} />
         ) : !myTurnish ? (
-          <p className="dim">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</p>
+          <Waiting state={state} />
         ) : view.phase === 'SETUP' ? (
-          <p style={{ color: 'var(--gold)', fontWeight: 700 }}>
+          <Prompt>
             {setupVertex ? 'Now tap an edge for your road' : 'Tap a highlighted corner for your settlement'}
-          </p>
+          </Prompt>
         ) : discardOwed > 0 ? (
           <>
-            <p className="error">Discard {discardOwed} cards ({discardTotal} picked)</p>
+            <Prompt danger>Discard {discardOwed} cards ({discardTotal} picked)</Prompt>
             <div className="row" style={{ justifyContent: 'center' }}>
               {RESOURCES.map((k) => (
                 <button key={k} className="secondary"
@@ -277,15 +354,15 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<CatanView, 
             </div>
           </>
         ) : view.phase === 'ROBBER' ? (
-          <p style={{ color: 'var(--gold)', fontWeight: 700 }}>Move the robber — tap a highlighted hex</p>
+          <Prompt>Move the robber — tap a highlighted hex</Prompt>
         ) : view.pendingTrade && view.pendingTrade.to === yourSeat ? (
           <>
-            <p style={{ color: 'var(--gold)', fontWeight: 700 }}>
+            <Prompt>
               🤝 {seatName(state.summary, view.pendingTrade.from)} offers{' '}
               {RESOURCES.filter((k) => (view.pendingTrade!.give[k] ?? 0) > 0).map((k) => `${view.pendingTrade!.give[k]}${RES_EMOJI[k]}`).join(' ') || 'nothing'}
               {' for '}
               {RESOURCES.filter((k) => (view.pendingTrade!.get[k] ?? 0) > 0).map((k) => `${view.pendingTrade!.get[k]}${RES_EMOJI[k]}`).join(' ') || 'nothing'}
-            </p>
+            </Prompt>
             <div className="row" style={{ justifyContent: 'center' }}>
               <button onClick={() => submitMove('RESPOND_TRADE', { accept: true })}>Accept</button>
               <button className="secondary" onClick={() => submitMove('RESPOND_TRADE', { accept: false })}>Reject</button>
@@ -333,12 +410,13 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<CatanView, 
             )}
           </>
         )}
-        {view.lastEvent && <p className="dim small">{view.lastEvent}</p>}
+        <EventLine text={view.lastEvent} />
       </div>
 
-      <div className="card">
+      <div className="board-frame">
         <Board
           view={view}
+          summary={state.summary}
           clickVertices={clickVertices}
           clickEdges={clickEdges}
           clickHexes={clickHexes}

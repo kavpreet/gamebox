@@ -2,12 +2,13 @@ import React, { useState } from 'react';
 import type { ScrabblePublic, ScrabbleMove, BoardCell } from '@gamebox/game-scrabble';
 import { premiumAt, LETTER_VALUES, BOARD_SIZE, CENTER } from '@gamebox/game-scrabble';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, WinnerBanner } from './common.js';
+import { TableLog } from './chrome.js';
+import { SeatDot, WinnerBanner, Prompt, Waiting, EventLine } from './common.js';
 
 type ScrabbleView = ScrabblePublic & { rack: string[] | null };
 
 const PREMIUM_BG: Record<string, string> = {
-  TW: '#8c2438', DW: '#b0567a', TL: '#2b4a9e', DL: '#4a7cf7',
+  TW: '#a3243f', DW: '#c2607f', TL: '#2b5ac2', DL: '#5a8fe8',
 };
 const PREMIUM_LABEL: Record<string, string> = { TW: '3W', DW: '2W', TL: '3L', DL: '2L' };
 
@@ -19,13 +20,14 @@ interface Pending {
   isBlank: boolean;
 }
 
-function Square({ cell, pending, row, col, size, highlight, onClick }: {
+function Square({ cell, pending, row, col, size, highlight, justPlaced, onClick }: {
   cell: BoardCell | null;
   pending?: Pending;
   row: number;
   col: number;
   size: number;
   highlight?: boolean;
+  justPlaced?: boolean;
   onClick?: () => void;
 }) {
   const prem = premiumAt(row, col);
@@ -46,16 +48,21 @@ function Square({ cell, pending, row, col, size, highlight, onClick }: {
         userSelect: 'none',
         cursor: onClick ? 'pointer' : 'default',
         background: letter
-          ? (pending ? '#f5a623' : '#e8d5a3')
+          ? (pending ? 'linear-gradient(150deg, #ffcf7d, #f5a623)' : 'linear-gradient(150deg, #f2e3bb, #e0c88f)')
           : prem
             ? PREMIUM_BG[prem]
-            : '#1a1e38',
-        color: letter ? (isBlank ? '#8c2438' : '#11131f') : '#c9cdea',
+            : '#20264a',
+        color: letter ? (isBlank ? '#a3243f' : '#241a12') : '#dfe3ff',
+        boxShadow: letter ? 'inset 0 -2px 0 rgba(0,0,0,0.25), 0 1px 2px rgba(0,0,0,0.4)' : undefined,
         outline: highlight ? '2px solid var(--gold)' : 'none',
         boxSizing: 'border-box',
       }}
     >
-      {letter ?? (row === CENTER && col === CENTER ? '★' : prem ? PREMIUM_LABEL[prem] : '')}
+      {letter ? (
+        <span className={justPlaced ? 'pop-in' : undefined}>{letter}</span>
+      ) : (
+        row === CENTER && col === CENTER ? '★' : prem ? PREMIUM_LABEL[prem] : ''
+      )}
     </div>
   );
 }
@@ -81,6 +88,7 @@ function Board({ view, pending = [], squareSize, onSquare }: {
               cell={view.board[r]![c] ?? null}
               pending={p}
               highlight={lastSet.has(`${r},${c}`)}
+              justPlaced={lastSet.has(`${r},${c}`)}
               onClick={onSquare && !view.board[r]![c] ? () => onSquare(r, c) : undefined}
             />
           );
@@ -100,13 +108,15 @@ function RackTile({ tile, selected, faded, onClick }: {
     <div
       onClick={onClick}
       style={{
-        width: 40, height: 44, borderRadius: 6,
-        background: faded ? '#33302a' : '#e8d5a3',
-        color: '#11131f',
+        width: 40, height: 44, borderRadius: 7,
+        background: faded ? '#33302a' : 'linear-gradient(150deg, #f2e3bb, #e0c88f)',
+        color: '#241a12',
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
         fontWeight: 800, fontSize: 20,
-        border: selected ? '3px solid #f5a623' : '1px solid #6b6350',
+        border: selected ? '3px solid #f5a623' : '1px solid #8a7358',
+        boxShadow: faded ? 'none' : 'inset 0 -3px 0 rgba(0,0,0,0.22), 0 2px 5px rgba(0,0,0,0.45)',
         transform: selected ? 'translateY(-5px)' : 'none',
+        transition: 'transform 0.1s',
         cursor: onClick ? 'pointer' : 'default',
         userSelect: 'none',
         opacity: faded ? 0.4 : 1,
@@ -129,7 +139,7 @@ function TvView({ state }: TvViewProps<ScrabbleView>) {
       <div className="tv-sidebar">
         {state.summary.players.filter((p) => view.order.includes(p.seat)).map((p) => (
           <div key={p.seat} className={`tv-player-chip ${state.activeSeats.includes(p.seat) ? 'active' : ''}`}>
-            <span className={`token seat-color-${p.seat % 6}`} />
+            <SeatDot summary={state.summary} seat={p.seat} />
             <span className="grow">{p.displayName} <span className="dim small">({view.rackCounts[p.seat] ?? 0} tiles)</span></span>
             <strong>{view.scores[p.seat] ?? 0}</strong>
           </div>
@@ -137,6 +147,7 @@ function TvView({ state }: TvViewProps<ScrabbleView>) {
         <p className="dim small">Bag: {view.bagSize} tiles</p>
         {view.lastEvent && <p className="dim small">{view.lastEvent}</p>}
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );
@@ -198,13 +209,11 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<ScrabbleVie
         {state.status === 'completed' ? (
           <WinnerBanner state={state} />
         ) : myTurn ? (
-          <p className="center" style={{ color: 'var(--gold)', fontWeight: 700 }}>
-            Your turn — tap a rack tile, then a square. House rules on words: your table is the dictionary!
-          </p>
+          <Prompt>Your turn — tap a rack tile, then a square. Your table is the dictionary!</Prompt>
         ) : (
-          <p className="dim center">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</p>
+          <Waiting state={state} />
         )}
-        {view.lastEvent && <p className="dim small center">{view.lastEvent}</p>}
+        <EventLine text={view.lastEvent} />
       </div>
 
       <div className="card" style={{ overflowX: 'auto' }}>

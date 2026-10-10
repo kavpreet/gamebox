@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import type { ChessPublic, ChessMove } from '@gamebox/game-chess';
 import type { PlayerViewProps, TvViewProps, GameUi } from './types.js';
-import { seatName, SeatTokens, WinnerBanner } from './common.js';
+import { TableStage, TableLog } from './chrome.js';
+import { SeatTokens, WinnerBanner, Prompt, Waiting, useHandMove, HandGlyph, FxDefs, CaptureBlast, useRecentChange, useBoardFit } from './common.js';
 
 const PIECES: Record<string, string> = {
   wk: '♔', wq: '♕', wr: '♖', wb: '♗', wn: '♘', wp: '♙',
@@ -42,6 +43,15 @@ function sq(file: number, rank: number): string {
   return String.fromCharCode(97 + file) + String(rank + 1);
 }
 
+function squareXY(name: string, flipped: boolean | undefined, C: number, M: number): { x: number; y: number } {
+  const file = name.charCodeAt(0) - 97;
+  const rank = Number(name[1]) - 1;
+  return {
+    x: (flipped ? 7 - file : file) * C + M + C / 2,
+    y: (flipped ? rank : 7 - rank) * C + M + C / 2,
+  };
+}
+
 function Board({
   view,
   flipped,
@@ -57,11 +67,37 @@ function Board({
 }) {
   const squares = parseFen(view.fen);
   const C = 60;
+  const M = 22; // margin for coordinates
+  const W = 8 * C + M * 2;
+
+  const moveKey = view.lastMove ? `${view.lastMove.from}-${view.lastMove.to}-${view.history.length}` : null;
+  const slideFrom = view.lastMove ? squareXY(view.lastMove.from, flipped, C, M) : null;
+  const slideTo = view.lastMove ? squareXY(view.lastMove.to, flipped, C, M) : null;
+  const slidePos = useHandMove(moveKey, slideFrom, slideTo);
+  const slidingPiece = slidePos && view.lastMove ? squares.find((s) => s.name === view.lastMove!.to)?.piece : null;
+  // SAN with an 'x' = a capture — blast the landing square as the piece arrives
+  const isCapture = view.history[view.history.length - 1]?.includes('x') ?? false;
+  const showBlast = useRecentChange(isCapture ? moveKey : null, 900, 660);
+
+  const fit = useBoardFit();
   return (
-    <svg viewBox={`0 0 ${8 * C} ${8 * C}`} style={{ maxWidth: '100%', maxHeight: '100%', width: '100%' }}>
+    <svg viewBox={`0 0 ${W} ${W}`} preserveAspectRatio={fit}
+      style={{ maxWidth: '100%', maxHeight: '100%', width: '100%', height: '100%' }}>
+      <FxDefs />
+      <rect width={W} height={W} rx={10} fill="#2e2115" />
+      {Array.from({ length: 8 }, (_, i) => {
+        const fileCh = String.fromCharCode(97 + (flipped ? 7 - i : i));
+        const rankCh = String(flipped ? i + 1 : 8 - i);
+        return (
+          <g key={i} fill="#8a7358" fontSize={11.5} fontWeight={700}>
+            <text x={M + i * C + C / 2} y={W - 7} textAnchor="middle">{fileCh}</text>
+            <text x={10} y={M + i * C + C / 2 + 4} textAnchor="middle">{rankCh}</text>
+          </g>
+        );
+      })}
       {squares.map((s) => {
-        const x = (flipped ? 7 - s.file : s.file) * C;
-        const y = (flipped ? s.rank : 7 - s.rank) * C;
+        const x = (flipped ? 7 - s.file : s.file) * C + M;
+        const y = (flipped ? s.rank : 7 - s.rank) * C + M;
         const light = (s.file + s.rank) % 2 === 1;
         const isLast = view.lastMove && (view.lastMove.from === s.name || view.lastMove.to === s.name);
         const isSel = selected === s.name;
@@ -69,19 +105,37 @@ function Board({
         return (
           <g key={s.name} onClick={onSquare ? () => onSquare(s.name) : undefined} style={onSquare ? { cursor: 'pointer' } : undefined}>
             <rect x={x} y={y} width={C} height={C}
-              fill={isSel ? '#f5a623' : isLast ? '#4a5387' : light ? '#39406e' : '#232847'} />
-            {isTarget && <circle cx={x + C / 2} cy={y + C / 2} r={s.piece ? C * 0.44 : C * 0.16}
-              fill={s.piece ? 'none' : 'rgba(46,196,182,0.55)'} stroke={s.piece ? 'rgba(46,196,182,0.8)' : 'none'} strokeWidth={4} />}
-            {s.piece && (
-              <text x={x + C / 2} y={y + C * 0.72} textAnchor="middle" fontSize={C * 0.72}
-                fill={s.piece[0] === 'w' ? '#f4f6ff' : '#0c0e1c'}
-                stroke={s.piece[0] === 'w' ? '#0c0e1c' : '#4a5387'} strokeWidth={0.8}>
+              fill={light ? '#f2debb' : '#b0754a'} />
+            {isLast && <rect x={x} y={y} width={C} height={C} fill="rgba(255,185,48,0.4)" />}
+            {isSel && <rect x={x} y={y} width={C} height={C} fill="rgba(255,185,48,0.65)" />}
+            {isTarget && <circle cx={x + C / 2} cy={y + C / 2} r={s.piece ? C * 0.44 : C * 0.15}
+              fill={s.piece ? 'none' : 'rgba(38,120,100,0.6)'} stroke={s.piece ? 'rgba(38,120,100,0.8)' : 'none'} strokeWidth={4.5} />}
+            {s.piece && !(slidePos && view.lastMove?.to === s.name) && (
+              <text x={x + C / 2} y={y + C * 0.74} textAnchor="middle" fontSize={C * 0.76}
+                fill={s.piece[0] === 'w' ? '#fdfdf8' : '#1c1512'}
+                stroke={s.piece[0] === 'w' ? '#3a2c20' : '#00000055'} strokeWidth={1}
+                style={{ filter: 'drop-shadow(0 2px 1.5px rgba(0,0,0,0.35))' }}>
                 {PIECES[s.piece]}
               </text>
             )}
           </g>
         );
       })}
+      <rect x={M} y={M} width={8 * C} height={8 * C} fill="url(#gb-boardlight)" style={{ pointerEvents: 'none' }} />
+      {showBlast && slideTo && (
+        <CaptureBlast x={slideTo.x} y={slideTo.y} color="#ff9d3c" r={C * 0.42} />
+      )}
+      {slidePos && slidingPiece && (
+        <g style={{ pointerEvents: 'none' }}>
+          <text x={slidePos.x} y={slidePos.y + C * 0.24} textAnchor="middle" fontSize={C * 0.76}
+            fill={slidingPiece[0] === 'w' ? '#fdfdf8' : '#1c1512'}
+            stroke={slidingPiece[0] === 'w' ? '#3a2c20' : '#00000055'} strokeWidth={1}
+            style={{ filter: 'drop-shadow(0 3px 3px rgba(0,0,0,0.5))' }}>
+            {PIECES[slidingPiece]}
+          </text>
+          <HandGlyph x={slidePos.x} y={slidePos.y} phase={slidePos.phase} t={slidePos.t} size={C * 0.95} />
+        </g>
+      )}
     </svg>
   );
 }
@@ -92,7 +146,9 @@ function TvView({ state }: TvViewProps<ChessPublic>) {
   return (
     <div className="tv-main">
       <div className="tv-board">
-        <Board view={view} />
+        <TableStage sides={2} tilt={44}>
+          <Board view={view} />
+        </TableStage>
       </div>
       <div className="tv-sidebar">
         <SeatTokens summary={state.summary} activeSeats={state.activeSeats} />
@@ -104,6 +160,7 @@ function TvView({ state }: TvViewProps<ChessPublic>) {
         )}
         {view.result === 'draw' && <div className="tv-player-chip active">Draw — {view.resultReason}</div>}
         <WinnerBanner state={state} />
+        <TableLog />
       </div>
     </div>
   );
@@ -142,14 +199,14 @@ function PlayerView({ state, yourSeat, submitMove }: PlayerViewProps<ChessPublic
             <WinnerBanner state={state} />
           </>
         ) : myTurn ? (
-          <p style={{ color: 'var(--gold)', fontWeight: 700 }}>
-            Your move ({yourSeat === 0 ? 'White' : 'Black'}){view.inCheck ? ' — you are in check!' : ''}
-          </p>
+          <Prompt danger={view.inCheck}>
+            Your move ({yourSeat === 0 ? '♔ White' : '♚ Black'}){view.inCheck ? ' — you are in check!' : ''}
+          </Prompt>
         ) : (
-          <p className="dim">Waiting for {state.activeSeats.map((s) => seatName(state.summary, s)).join(', ')}…</p>
+          <Waiting state={state} />
         )}
       </div>
-      <div className="card">
+      <div className="board-frame">
         <Board
           view={view}
           flipped={yourSeat === 1}

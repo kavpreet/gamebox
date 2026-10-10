@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import type { GameSummary, Seat, GameStatus } from '@gamebox/shared-types';
+import type { GameSummary, Seat, GameStatus, Beat, TurnClock, TableOptions } from '@gamebox/shared-types';
 
 /** Payload of the server's `game:state` / `tv:state` events. */
 export interface LiveState<TView = unknown, TMove = unknown> {
@@ -10,6 +10,10 @@ export interface LiveState<TView = unknown, TMove = unknown> {
   activeSeats: Seat[];
   view: TView | null;
   result: { winners?: Seat[]; winningTeam?: number; cooperativeLoss?: boolean } | null;
+  /** Narration for the move that produced this update; empty on a plain re-sync. */
+  beats?: Beat[];
+  clock?: TurnClock | null;
+  options?: TableOptions;
   /** player-only fields */
   yourSeat?: Seat;
   legalMoves?: TMove[];
@@ -25,6 +29,7 @@ export interface PlayerViewProps<TView = unknown, TMove = unknown> {
 export interface TvViewProps<TView = unknown> {
   state: LiveState<TView>;
 }
+
 
 export interface GameUi {
   slug: string;
